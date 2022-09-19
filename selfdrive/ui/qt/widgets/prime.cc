@@ -18,21 +18,24 @@
 using qrcodegen::QrCode;
 
 PairingQRWidget::PairingQRWidget(QWidget* parent) : QWidget(parent) {
-  QTimer* timer = new QTimer(this);
-  timer->start(5 * 60 * 1000);
+  timer = new QTimer(this);
   connect(timer, &QTimer::timeout, this, &PairingQRWidget::refresh);
 }
 
 void PairingQRWidget::showEvent(QShowEvent *event) {
   refresh();
+  timer->start(5 * 60 * 1000);
+}
+
+void PairingQRWidget::hideEvent(QHideEvent *event) {
+  timer->stop();
 }
 
 void PairingQRWidget::refresh() {
-  if (isVisible()) {
-    QString pairToken = CommaApi::create_jwt({{"pair", true}});
-    QString qrString = "https://connect.comma.ai/?pair=" + pairToken;
-    this->updateQrCode(qrString);
-  }
+  QString pairToken = CommaApi::create_jwt({{"pair", true}});
+  QString qrString = "https://connect.comma.ai/?pair=" + pairToken;
+  this->updateQrCode(qrString);
+  update();
 }
 
 void PairingQRWidget::updateQrCode(const QString &text) {
@@ -190,7 +193,7 @@ PrimeAdWidget::PrimeAdWidget(QWidget* parent) : QFrame(parent) {
   main_layout->addSpacing(50);
 
   QLabel *description = new QLabel(tr("Become a comma prime member at connect.comma.ai"));
-  description->setStyleSheet("font-size: 60px; font-weight: light; color: white;");
+  description->setStyleSheet("font-size: 50px; font-weight: light; color: white;");
   description->setWordWrap(true);
   main_layout->addWidget(description, 0, Qt::AlignTop);
 
@@ -238,7 +241,7 @@ SetupWidget::SetupWidget(QWidget* parent) : QFrame(parent) {
 
   QLabel* registrationDescription = new QLabel(tr("Pair your device with comma connect (connect.comma.ai) and claim your comma prime offer."));
   registrationDescription->setWordWrap(true);
-  registrationDescription->setStyleSheet("font-size: 55px; font-weight: light; margin-left: 55px;");
+  registrationDescription->setStyleSheet("font-size: 50px; font-weight: light; margin-left: 55px;");
   finishRegistationLayout->addWidget(registrationDescription);
 
   finishRegistationLayout->addStretch();
@@ -274,7 +277,7 @@ SetupWidget::SetupWidget(QWidget* parent) : QFrame(parent) {
   primeUser = new PrimeUserWidget;
   mainLayout->addWidget(primeUser);
 
-  mainLayout->setCurrentWidget(primeAd);
+  mainLayout->setCurrentWidget(uiState()->prime_type ? (QWidget*)primeUser : (QWidget*)primeAd);
 
   setFixedWidth(750);
   setStyleSheet(R"(
@@ -296,11 +299,9 @@ SetupWidget::SetupWidget(QWidget* parent) : QFrame(parent) {
 
     QObject::connect(repeater, &RequestRepeater::requestDone, this, &SetupWidget::replyFinished);
   }
-  hide(); // Only show when first request comes back
 }
 
 void SetupWidget::replyFinished(const QString &response, bool success) {
-  show();
   if (!success) return;
 
   QJsonDocument doc = QJsonDocument::fromJson(response.toUtf8());

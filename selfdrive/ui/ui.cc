@@ -204,6 +204,7 @@ void ui_update_params(UIState *s) {
   auto params = Params();
   s->scene.is_metric = params.getBool("IsMetric");
   s->scene.map_on_left = params.getBool("NavSettingLeftSide");
+  s->scene.end_to_end_long = params.getBool("EndToEndLong");
 }
 
 void UIState::updateStatus() {
@@ -251,7 +252,7 @@ void UIState::updateStatus() {
     if (scene.started) {
       status = STATUS_DISENGAGED;
       scene.started_frame = sm->frame;
-      scene.end_to_end = Params().getBool("EndToEndToggle");
+      scene.end_to_end_long = Params().getBool("EndToEndLong");
       wide_camera = Params().getBool("WideCameraOnly");
     }
     started_prev = scene.started;
@@ -270,6 +271,7 @@ UIState::UIState(QObject *parent) : QObject(parent) {
   Params params;
   wide_camera = params.getBool("WideCameraOnly");
   prime_type = std::atoi(params.get("PrimeType").c_str());
+  language = QString::fromStdString(params.get("LanguageSetting"));
 
   // update timer
   timer = new QTimer(this);

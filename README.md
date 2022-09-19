@@ -15,23 +15,22 @@ crwusiz openpilot
 - brake, bsd, gps, wifi icon
 - wheel, N direction icon rotate
 - lateralcontrol select ( Pid / Indi / Lqr / Torque )
-- mfc select ( LKAS / LDWS / LFA / HDA2 )
+- mfc select ( LDWS,LKAS / LFA )
 - aebsignal select ( SCC12 / FCA11 )
-- longcontrol select ( MAD / MAD+LONG )
 - add community toggle / function / simple ui
 - LongitudinalControl full support
 - autohold, turnsignal, tpms, roadlimitspeed display (neokii)
 
 ## Source Code Reference
 - https://github.com/commaai/openpilot
-- https://github.com/xx979xx/openpilo
+- https://github.com/xx979xx/openpilot
 - https://github.com/xps-genesis/openpilot
 - https://github.com/kegman/openpilot
 - https://github.com/dragonpilot-community/dragonpilot
 - https://github.com/wirelessnet2/openpilot
 - https://github.com/sshane/openpilot
 - https://github.com/arne182/ArnePilot
-- https://github.com/neokii
+- https://github.com/neokii/npilot
 - https://github.com/openpilotusers
 - https://github.com/Circuit-Pro/openpilot
 - - -
@@ -45,6 +44,7 @@ cable order -> https://smartstore.naver.com/hyotrade/products/5341431170
 
 ## chevrolet bolt branch
 - https://github.com/JasonJShuler/openpilot
+- https://github.com/opgm/openpilot
 - https://github.com/hanabi95/openpilot
 - https://github.com/jc01rho-openpilot-BoltEV2019-KoKr
 - https://github.com/parksunkyu81

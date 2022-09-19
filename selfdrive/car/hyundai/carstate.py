@@ -1,15 +1,16 @@
 from collections import deque
 import copy
+import math
 
 from cereal import car
 from common.conversions import Conversions as CV
 from opendbc.can.parser import CANParser
 from opendbc.can.can_define import CANDefine
-from selfdrive.car.hyundai.values import HyundaiFlags, DBC, CarControllerParams, Buttons, FEATURES, EV_CAR, HYBRID_CAR, EV_HYBRID_CAR, CAR, CANFD_CAR, FCA11_CAR
+from selfdrive.car.hyundai.values import HyundaiFlags, DBC, CarControllerParams, Buttons, FEATURES, EV_CAR, HEV_CAR, EV_HEV_CAR, CAR, CANFD_CAR, FCA11_CAR
 from selfdrive.car.interfaces import CarStateBase
 
 PREV_BUTTON_SAMPLES = 8
-
+CLUSTER_SAMPLE_RATE = 20  # frames
 
 class CarState(CarStateBase):
   def __init__(self, CP):
@@ -30,14 +31,14 @@ class CarState(CarStateBase):
 
     #Auto detection for setup
     self.no_radar = CP.sccBus == -1
-    self.mdps_bus = CP.mdpsBus
+    self.eps_bus = CP.epsBus
     self.sas_bus = CP.sasBus
     self.scc_bus = CP.sccBus
     self.has_scc13 = CP.hasScc13
     self.has_scc14 = CP.hasScc14
     self.has_lfa_hda = CP.hasLfaHda
     self.aebFcw = CP.aebFcw or CP.carFingerprint in FCA11_CAR
-    self.mdps_error_cnt = 0
+    self.eps_error_cnt = 0
     self.cruise_unavail_cnt = 0
     self.apply_steer = 0.
 
@@ -52,18 +53,22 @@ class CarState(CarStateBase):
     self.cruiseState_speed = 0
     self.buttons_counter = 0
 
+    # On some cars, CLU15->CF_Clu_VehicleSpeed can oscillate faster than the dash updates. Sample at 5 Hz
+    self.cluster_speed = 0
+    self.cluster_speed_counter = CLUSTER_SAMPLE_RATE
+
     self.params = CarControllerParams(CP)
 
   def update(self, cp, cp2, cp_cam):
     if self.CP.carFingerprint in CANFD_CAR:
       return self.update_canfd(cp, cp_cam)
 
-    cp_mdps = cp2 if self.mdps_bus else cp
+    cp_eps = cp2 if self.eps_bus else cp
     cp_sas = cp2 if self.sas_bus else cp
     cp_scc = cp2 if self.scc_bus == 1 else cp_cam if self.scc_bus == 2 else cp
 
-    self.metric = not cp.vl["CLU11"]["CF_Clu_SPEED_UNIT"]
-    self.speed_conv = CV.KPH_TO_MS if self.metric else CV.MPH_TO_MS
+    self.is_metric = cp.vl["CLU11"]["CF_Clu_SPEED_UNIT"] == 0
+    self.speed_conv = CV.KPH_TO_MS if self.is_metric else CV.MPH_TO_MS
 
     ret = car.CarState.new_message()
 
@@ -76,25 +81,31 @@ class CarState(CarStateBase):
                                             cp.vl["WHL_SPD11"]["WHL_SPD_RL"], cp.vl["WHL_SPD11"]["WHL_SPD_RR"])
 
     ret.vEgoRaw = (ret.wheelSpeeds.fl + ret.wheelSpeeds.fr + ret.wheelSpeeds.rl + ret.wheelSpeeds.rr) / 4.
-    #ret.vEgoCluster = (cp.vl["CLU15"]["CF_Clu_VehicleSpeed"] * CV.KPH_TO_MS) if self.metric else (cp.vl["CLU15"]["CF_Clu_VehicleSpeed2"] * CV.MPH_TO_MS)
-    ret.vEgoCluster = cp.vl["CLU11"]["CF_Clu_Vanz"] * self.speed_conv
     ret.vEgo, ret.aEgo = self.update_speed_kf(ret.vEgoRaw)
-
     ret.standstill = ret.vEgoRaw < 0.01
+
+    self.cluster_speed_counter += 1
+    if self.cluster_speed_counter > CLUSTER_SAMPLE_RATE:
+      self.cluster_speed = cp.vl["CLU15"]["CF_Clu_VehicleSpeed"]
+      self.cluster_speed_counter = 0
+
+      # mimic how dash converts to imperial
+      if not self.is_metric:
+        self.cluster_speed = math.floor(self.cluster_speed * CV.KPH_TO_MPH + CV.KPH_TO_MPH)
+
+    ret.vEgoCluster = self.cluster_speed * self.speed_conv
+
     ret.steeringAngleDeg = cp_sas.vl["SAS11"]["SAS_Angle"]
     ret.steeringRateDeg = cp_sas.vl["SAS11"]["SAS_Speed"]
-    ret.steeringTorque = cp_mdps.vl["MDPS12"]["CR_Mdps_StrColTq"]
-    ret.steeringTorqueEps = cp_mdps.vl["MDPS12"]["CR_Mdps_OutTq"] / 10.  # scale to Nm
+    ret.steeringTorque = cp_eps.vl["MDPS12"]["CR_Mdps_StrColTq"]
+    ret.steeringTorqueEps = cp_eps.vl["MDPS12"]["CR_Mdps_OutTq"]
     ret.steeringPressed = abs(ret.steeringTorque) > self.params.STEER_THRESHOLD
     ret.yawRate = cp.vl["ESP12"]["YAW_RATE"]
     ret.leftBlinker, ret.rightBlinker = self.update_blinker_from_lamp(50, cp.vl["CGW1"]["CF_Gway_TurnSigLh"],
                                                                       cp.vl["CGW1"]["CF_Gway_TurnSigRh"])
 
-    if not ret.standstill and cp_mdps.vl["MDPS12"]["CF_Mdps_ToiUnavail"] != 0:
-      self.mdps_error_cnt += 1
-    else:
-      self.mdps_error_cnt = 0
-    ret.steerFaultTemporary = self.mdps_error_cnt > 50
+    self.eps_error_cnt += 1 if cp_eps.vl["MDPS12"]["CF_Mdps_ToiUnavail"] != 0 else -self.eps_error_cnt
+    ret.steerFaultTemporary = self.eps_error_cnt > 100
 
     if self.CP.enableAutoHold:
       ret.autoHold = cp.vl["ESP11"]["AVH_STAT"]
@@ -126,8 +137,8 @@ class CarState(CarStateBase):
 
     ret.gasPressed = cp.vl["TCS13"]["DriverOverride"] == 1
 
-    if self.CP.carFingerprint in EV_HYBRID_CAR:
-      if self.CP.carFingerprint in HYBRID_CAR:
+    if self.CP.carFingerprint in EV_HEV_CAR:
+      if self.CP.carFingerprint in HEV_CAR:
         ret.gas = cp.vl["E_EMS11"]["CR_Vcu_AccPedDep_Pos"] / 254.
       else:
         ret.gas = cp.vl["E_EMS11"]["Accel_Pedal_Pos"] / 254.
@@ -172,7 +183,7 @@ class CarState(CarStateBase):
     self.clu11 = cp.vl["CLU11"]
     self.scc11 = cp_scc.vl["SCC11"]
     self.scc12 = cp_scc.vl["SCC12"]
-    self.mdps12 = cp_mdps.vl["MDPS12"]
+    self.mdps12 = cp_eps.vl["MDPS12"]
     self.lfahda_mfc = cp_cam.vl["LFAHDA_MFC"]
 
     if self.has_scc13:
@@ -180,7 +191,7 @@ class CarState(CarStateBase):
     if self.has_scc14:
       self.scc14 = cp_scc.vl["SCC14"]
 
-    self.steer_state = cp_mdps.vl["MDPS12"]["CF_Mdps_ToiActive"]  # 0 NOT ACTIVE, 1 ACTIVE
+    self.steer_state = cp_eps.vl["MDPS12"]["CF_Mdps_ToiActive"]  # 0 NOT ACTIVE, 1 ACTIVE
     self.brake_error = cp.vl["TCS13"]["ACCEnable"] != 0  # 0 ACC CONTROL ENABLED, 1-3 ACC CONTROL DISABLED
     self.cruise_unavail_cnt += 1 if cp.vl["TCS13"]["CF_VSM_Avail"] != 1 and \
                                     cp.vl["TCS13"]["ACCEnable"] != 0 else -self.cruise_unavail_cnt
@@ -298,7 +309,6 @@ class CarState(CarStateBase):
       ("CF_Clu_AliveCnt1", "CLU11"),
 
       ("CF_Clu_VehicleSpeed", "CLU15"),
-      ("CF_Clu_VehicleSpeed2", "CLU15"),
 
       ("ACCEnable", "TCS13"),
       ("ACC_REQ", "TCS13"),
@@ -371,7 +381,7 @@ class CarState(CarStateBase):
       ("TCS13", 50),
       ("TCS15", 10),
       ("CLU11", 50),
-      ("CLU15", 4),
+      ("CLU15", 5),
       ("ESP12", 100),
       ("CGW1", 10),
       ("CGW2", 5),
@@ -384,7 +394,7 @@ class CarState(CarStateBase):
         ("SCC11", 50),
         ("SCC12", 50),
       ]
-    if CP.mdpsBus == 0:
+    if CP.epsBus == 0:
       signals += [
         ("CR_Mdps_StrColTq", "MDPS12"),
         ("CF_Mdps_Def", "MDPS12"),
@@ -435,8 +445,8 @@ class CarState(CarStateBase):
       ]
       checks.append(("ESP11", 50))
 
-    if CP.carFingerprint in EV_HYBRID_CAR:
-      if CP.carFingerprint in HYBRID_CAR:
+    if CP.carFingerprint in EV_HEV_CAR:
+      if CP.carFingerprint in HEV_CAR:
         signals.append(("CR_Vcu_AccPedDep_Pos", "E_EMS11"))
       else:
         signals.append(("Accel_Pedal_Pos", "E_EMS11"))
@@ -453,7 +463,7 @@ class CarState(CarStateBase):
 
     if CP.carFingerprint in FEATURES["use_cluster_gears"]:
       signals.append(("CF_Clu_Gear", "CLU15"))
-      checks.append(("CLU15", 5))
+      #checks.append(("CLU15", 5))
     elif CP.carFingerprint in FEATURES["use_tcu_gears"]:
       signals.append(("CUR_GR", "TCU12"))
       checks.append(("TCU12", 100))
@@ -473,7 +483,7 @@ class CarState(CarStateBase):
 
     signals = []
     checks = []
-    if CP.mdpsBus == 1:
+    if CP.epsBus == 1:
       signals += [
         ("CR_Mdps_StrColTq", "MDPS12"),
         ("CF_Mdps_Def", "MDPS12"),

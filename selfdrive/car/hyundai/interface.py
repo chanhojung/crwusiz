@@ -5,10 +5,8 @@ from common.params import Params
 from common.numpy_fast import interp
 from common.conversions import Conversions as CV
 from selfdrive.car.hyundai.values import HyundaiFlags, CAR, Buttons, CarControllerParams, CANFD_CAR
-from selfdrive.car.hyundai.radar_interface import RADAR_START_ADDR
 from selfdrive.car import STD_CARGO_KG, create_button_event, scale_rot_inertia, scale_tire_stiffness, gen_empty_fingerprint, get_safety_config
 from selfdrive.car.interfaces import CarInterfaceBase
-from selfdrive.car.disable_ecu import disable_ecu
 from selfdrive.controls.lib.desire_helper import LANE_CHANGE_SPEED_MIN
 
 ButtonType = car.CarState.ButtonEvent.Type
@@ -23,14 +21,18 @@ class CarInterface(CarInterfaceBase):
     v_current_kph = current_speed * CV.MS_TO_KPH
 
     gas_max_bp = [10., 20., 50., 70., 130., 150.]
-    gas_max_v = [1.4, 1.2, 0.63, 0.44, 0.15, 0.1]
+    gas_max_v = [1.3, 1.1, 0.63, 0.44, 0.15, 0.1]
 
     return CarControllerParams.ACCEL_MIN, interp(v_current_kph, gas_max_bp, gas_max_v)
 
   @staticmethod
-  def get_params(candidate, fingerprint=gen_empty_fingerprint(), car_fw=[], disable_radar=False):  # pylint: disable=dangerous-default-value
+  def get_params(candidate, fingerprint=gen_empty_fingerprint(), car_fw=[], experimental_long=False):  # pylint: disable=dangerous-default-value
     ret = CarInterfaceBase.get_std_params(candidate, fingerprint)
-    ret.openpilotLongitudinalControl = Params().get("LongControlSelect", encoding='utf8') == "1"
+
+    # WARNING: disabling radar also disables AEB (and we show the same warning on the instrument cluster as if you manually disabled AEB)
+    ret.experimentalLongitudinalAvailable = candidate not in CANFD_CAR #(LEGACY_SAFETY_MODE_CAR | CAMERA_SCC_CAR | CANFD_CAR)
+    ret.openpilotLongitudinalControl = (experimental_long and ret.experimentalLongitudinalAvailable) or \
+                                       Params().get_bool("LongControl") or ret.sccBus == 2
 
     ret.carName = "hyundai"
     if candidate in CANFD_CAR:
@@ -39,9 +41,20 @@ class CarInterface(CarInterfaceBase):
     else:
       ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.hyundaiCommunity, 0)]
 
-    ret.maxSteeringAngleDeg = 1000.
-    ret.steerFaultMaxAngle = 85
-    ret.steerFaultMaxFrames = 90
+    ret.steerActuatorDelay = 0.25
+    ret.steerLimitTimer = 2.5
+
+    # longitudinal
+    ret.longitudinalTuning.kpBP = [0., 5. * CV.KPH_TO_MS, 10. * CV.KPH_TO_MS, 30. * CV.KPH_TO_MS, 130. * CV.KPH_TO_MS]
+    ret.longitudinalTuning.kpV = [1.2, 1.0, 0.93, 0.88, 0.5]
+    ret.longitudinalTuning.kiBP = [0., 130. * CV.KPH_TO_MS]
+    ret.longitudinalTuning.kiV = [0.1, 0.05]
+    ret.longitudinalActuatorDelayLowerBound = 0.5
+    ret.longitudinalActuatorDelayUpperBound = 0.5
+
+    ret.stoppingDecelRate = 1.0
+    ret.vEgoStopping = 0.8
+    ret.vEgoStarting = 0.8
 
     tire_stiffness_factor = 1.
 
@@ -195,72 +208,42 @@ class CarInterface(CarInterfaceBase):
 
     # Pid -----------------------------------------------------------------
     if Params().get("LateralControlSelect", encoding='utf8') == "0":
+      ret.lateralTuning.pid.kf = 0.00005
+      ret.lateralTuning.pid.kpBP = [0.]
+      ret.lateralTuning.pid.kiBP = [0.]
+
       if candidate == CAR.PALISADE:
-        ret.lateralTuning.pid.kf = 0.00005
-        ret.lateralTuning.pid.kpBP = [0.]
         ret.lateralTuning.pid.kpV = [0.3]
-        ret.lateralTuning.pid.kiBP = [0.]
         ret.lateralTuning.pid.kiV = [0.05]
       elif candidate in [CAR.GENESIS, CAR.GENESIS_G70, CAR.GENESIS_G80, CAR.GENESIS_G90]:
-        ret.lateralTuning.pid.kf = 0.00005
-        ret.lateralTuning.pid.kpBP = [0.]
         ret.lateralTuning.pid.kpV = [0.16]
-        ret.lateralTuning.pid.kiBP = [0.]
         ret.lateralTuning.pid.kiV = [0.01]
       else:
-        ret.lateralTuning.pid.kf = 0.00005
-        ret.lateralTuning.pid.kpBP = [0.]
         ret.lateralTuning.pid.kpV = [0.25]
-        ret.lateralTuning.pid.kiBP = [0.]
         ret.lateralTuning.pid.kiV = [0.05]
 
     # Indi -----------------------------------------------------------------
     elif Params().get("LateralControlSelect", encoding='utf8') == "1":
       ret.lateralTuning.init('indi')
-      if candidate == CAR.IONIQ_HEV:
-        ret.lateralTuning.indi.innerLoopGainBP = [0.]
+      ret.lateralTuning.indi.innerLoopGainBP = [0.]
+      ret.lateralTuning.indi.outerLoopGainBP = [0.]
+      ret.lateralTuning.indi.timeConstantBP = [0.]
+      ret.lateralTuning.indi.actuatorEffectivenessBP = [0.]
+
+      if candidate in [CAR.IONIQ_HEV, CAR.GENESIS_G70]:
         ret.lateralTuning.indi.innerLoopGainV = [2.5]
-        ret.lateralTuning.indi.outerLoopGainBP = [0.]
         ret.lateralTuning.indi.outerLoopGainV = [3.5]
-        ret.lateralTuning.indi.timeConstantBP = [0.]
         ret.lateralTuning.indi.timeConstantV = [1.4]
-        ret.lateralTuning.indi.actuatorEffectivenessBP = [0.]
         ret.lateralTuning.indi.actuatorEffectivenessV = [1.8]
       elif candidate == CAR.SELTOS:
-        ret.lateralTuning.indi.innerLoopGainBP = [0.]
         ret.lateralTuning.indi.innerLoopGainV = [4.]
-        ret.lateralTuning.indi.outerLoopGainBP = [0.]
         ret.lateralTuning.indi.outerLoopGainV = [3.]
-        ret.lateralTuning.indi.timeConstantBP = [0.]
         ret.lateralTuning.indi.timeConstantV = [1.4]
-        ret.lateralTuning.indi.actuatorEffectivenessBP = [0.]
-        ret.lateralTuning.indi.actuatorEffectivenessV = [1.8]
-      elif candidate == CAR.GENESIS:
-        ret.lateralTuning.indi.innerLoopGainBP = [0.]
-        ret.lateralTuning.indi.innerLoopGainV = [3.5]
-        ret.lateralTuning.indi.outerLoopGainBP = [0.]
-        ret.lateralTuning.indi.outerLoopGainV = [2.0]
-        ret.lateralTuning.indi.timeConstantBP = [0.]
-        ret.lateralTuning.indi.timeConstantV = [1.4]
-        ret.lateralTuning.indi.actuatorEffectivenessBP = [0.]
-        ret.lateralTuning.indi.actuatorEffectivenessV = [2.3]
-      elif candidate == CAR.GENESIS_G70:
-        ret.lateralTuning.indi.innerLoopGainBP = [0.]
-        ret.lateralTuning.indi.innerLoopGainV = [2.5]
-        ret.lateralTuning.indi.outerLoopGainBP = [0.]
-        ret.lateralTuning.indi.outerLoopGainV = [3.5]
-        ret.lateralTuning.indi.timeConstantBP = [0.]
-        ret.lateralTuning.indi.timeConstantV = [1.4]
-        ret.lateralTuning.indi.actuatorEffectivenessBP = [0.]
         ret.lateralTuning.indi.actuatorEffectivenessV = [1.8]
       else:
-        ret.lateralTuning.indi.innerLoopGainBP = [0.]
         ret.lateralTuning.indi.innerLoopGainV = [3.5]
-        ret.lateralTuning.indi.outerLoopGainBP = [0.]
         ret.lateralTuning.indi.outerLoopGainV = [2.0]
-        ret.lateralTuning.indi.timeConstantBP = [0.]
         ret.lateralTuning.indi.timeConstantV = [1.4]
-        ret.lateralTuning.indi.actuatorEffectivenessBP = [0.]
         ret.lateralTuning.indi.actuatorEffectivenessV = [2.3]
 
     # Lqr -----------------------------------------------------------------
@@ -328,22 +311,6 @@ class CarInterface(CarInterfaceBase):
     ret.centerToFront = ret.wheelbase * 0.4
     ret.radarTimeStep = 0.05
 
-    ret.steerActuatorDelay = 0.2
-    ret.steerLimitTimer = 2.5
-
-    # longitudinal
-    ret.longitudinalTuning.kpBP = [0., 5. * CV.KPH_TO_MS, 10. * CV.KPH_TO_MS, 30. * CV.KPH_TO_MS, 130. * CV.KPH_TO_MS]
-    ret.longitudinalTuning.kpV = [1.2, 1.0, 0.93, 0.88, 0.5]
-    ret.longitudinalTuning.kiBP = [0., 130. * CV.KPH_TO_MS]
-    ret.longitudinalTuning.kiV = [0.1, 0.05]
-    ret.longitudinalActuatorDelayLowerBound = 0.3
-    ret.longitudinalActuatorDelayUpperBound = 0.3
-
-    ret.stopAccel = -2.5
-    ret.stoppingDecelRate = 0.4  # brake_travel/s while trying to stop
-    ret.vEgoStarting = 0.5
-    ret.vEgoStopping = 1.0
-
     # TODO: get actual value, for now starting with reasonable value for
     # civic and scaling by mass and wheelbase
     ret.rotationalInertia = scale_rot_inertia(ret.mass, ret.wheelbase)
@@ -366,7 +333,7 @@ class CarInterface(CarInterfaceBase):
           ret.safetyConfigs[1].safetyParam |= Panda.FLAG_HYUNDAI_CANFD_ALT_BUTTONS
     else:
       # ignore CAN2 address if L-CAN on the same BUS
-      ret.mdpsBus = 1 if 593 in fingerprint[1] and 1296 not in fingerprint[1] else 0
+      ret.epsBus = 1 if 593 in fingerprint[1] and 1296 not in fingerprint[1] else 0
       ret.sasBus = 1 if 688 in fingerprint[1] and 1296 not in fingerprint[1] else 0
       ret.sccBus = 0 if 1056 in fingerprint[0] \
               else 1 if 1056 in fingerprint[1] and 1296 not in fingerprint[1] \
@@ -385,17 +352,8 @@ class CarInterface(CarInterfaceBase):
 
     ret.pcmCruise = not ret.radarOffCan
 
-    #if ret.openpilotLongitudinalControl:
-    #  ret.safetyConfigs[0].safetyParam |= Panda.FLAG_HYUNDAI_LONG
-
-    #ret.radarOffCan = RADAR_START_ADDR not in fingerprint[1] or DBC[ret.carFingerprint]["radar"] is None
-
     return ret
 
-  #@staticmethod
-  #def init(CP, logcan, sendcan):
-  #  if CP.openpilotLongitudinalControl:
-  #    disable_ecu(logcan, sendcan, addr=0x7d0, com_cont_req=b'\x28\x83\x01')
 
   def _update(self, c):
     ret = self.CS.update(self.cp, self.cp2, self.cp_cam)
@@ -409,8 +367,7 @@ class CarInterface(CarInterfaceBase):
       self.CP.pcmCruise = True
 
     # most HKG cars has no long control, it is safer and easier to engage by main on
-    if any([Params().get("LongControlSelect", encoding='utf8') == "0", Params().get("LongControlSelect", encoding='utf8') == "1"]):
-      ret.cruiseState.enabled = ret.cruiseState.available
+    ret.cruiseState.enabled = ret.cruiseState.available
 
     if self.CS.cruise_buttons[-1] != self.CS.prev_cruise_buttons:
       buttonEvents = [create_button_event(self.CS.cruise_buttons[-1], self.CS.prev_cruise_buttons, BUTTONS_DICT)]
@@ -447,7 +404,7 @@ class CarInterface(CarInterfaceBase):
       self.low_speed_alert = True
     if ret.vEgo > (self.CP.minSteerSpeed + 4.):
       self.low_speed_alert = False
-    if self.low_speed_alert and not self.CS.mdps_bus:
+    if self.low_speed_alert and not self.CS.eps_bus:
       events.add(car.CarEvent.EventName.belowSteerSpeed)
 
     ret.events = events.to_msg()

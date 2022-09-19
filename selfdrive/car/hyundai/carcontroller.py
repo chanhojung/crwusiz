@@ -15,7 +15,10 @@ from selfdrive.car.hyundai.scc_smoother import SccSmoother
 VisualAlert = car.CarControl.HUDControl.VisualAlert
 LongCtrlState = car.CarControl.Actuators.LongControlState
 
-min_set_speed = 30 * CV.KPH_TO_MS
+STEER_FAULT_MAX_ANGLE = 85  # EPS max is 90
+STEER_FAULT_MAX_FRAMES = 39  # EPS counter is 95
+
+MIN_SET_SPEED = 30 * CV.KPH_TO_MS
 
 def process_hud_alert(enabled, hud_control):
   sys_warning = (hud_control.visualAlert in (VisualAlert.steerRequired, VisualAlert.ldw))
@@ -44,19 +47,15 @@ def process_hud_alert(enabled, hud_control):
 class CarController:
   def __init__(self, dbc_name, CP, VM):
     self.CP = CP
-    self.steer_fault_max_angle = CP.steerFaultMaxAngle
-    self.steer_fault_max_frames = CP.steerFaultMaxFrames
     self.longcontrol = CP.openpilotLongitudinalControl
     self.scc_live = not CP.radarOffCan
 
     self.params = CarControllerParams(CP)
     self.packer = CANPacker(dbc_name)
 
-    self.cut_steer = False
     self.turning_indicator_alert = False
 
     self.angle_limit_counter = 0
-    self.cut_steer_frames = 0
     self.last_button_frame = 0
     self.frame = 0
     self.apply_steer_last = 0
@@ -99,7 +98,7 @@ class CarController:
     sys_warning, sys_state, left_lane_warning, right_lane_warning = process_hud_alert(CC.enabled, hud_control)
 
     clu11_speed = CS.clu11["CF_Clu_Vanz"]
-    enabled_speed = 60 if CS.metric else 38
+    enabled_speed = 60 if CS.is_metric else 38
     if clu11_speed > enabled_speed or not CC.latActive:
       enabled_speed = clu11_speed
 
@@ -107,41 +106,32 @@ class CarController:
       self.lkas11_cnt = CS.lkas11["CF_Lkas_MsgCount"]
     self.lkas11_cnt = (self.lkas11_cnt + 1) % 0x10
 
+    if CC.latActive and abs(CS.out.steeringAngleDeg) >= STEER_FAULT_MAX_ANGLE:
+      self.angle_limit_counter += 1
+    else:
+      self.angle_limit_counter = 0
+
+    # stop requesting torque to avoid 90 degree fault and hold torque with induced temporary fault
     cut_steer_temp = False
-    if self.steer_fault_max_angle > 0:
-      if CC.latActive and abs(CS.out.steeringAngleDeg) > self.steer_fault_max_angle:
-        self.angle_limit_counter += 1
-      else:
-        self.angle_limit_counter = 0
-
-      # stop requesting torque to avoid 90 degree fault and hold torque with induced temporary fault
-      # two cycles avoids race conditions every few minutes
-      if self.angle_limit_counter > self.steer_fault_max_frames:
-        self.cut_steer = True
-      elif self.cut_steer_frames > 1:
-        self.cut_steer_frames = 0
-        self.cut_steer = False
-
-      if self.cut_steer:
-        cut_steer_temp = True
-        self.angle_limit_counter = 0
-        self.cut_steer_frames += 1
+    if self.angle_limit_counter > STEER_FAULT_MAX_FRAMES:
+      cut_steer_temp = True
+      self.angle_limit_counter = 0
 
     can_sends = []
     can_sends.append(hyundaican.create_lkas11(self.packer, self.frame, self.CP.carFingerprint, apply_steer, CC.latActive, cut_steer_temp, CS.lkas11, sys_warning,
                                               sys_state, CC.enabled, hud_control.leftLaneVisible, hud_control.rightLaneVisible, left_lane_warning, right_lane_warning, 0))
 
-    if CS.mdps_bus or CS.scc_bus == 1:  # send lkas11 bus 1 if mdps or scc is on bus 1
+    if CS.eps_bus or CS.scc_bus == 1:  # send lkas11 bus 1 if eps or scc is on bus 1
       can_sends.append(hyundaican.create_lkas11(self.packer, self.frame, self.CP.carFingerprint, apply_steer, CC.latActive, cut_steer_temp, CS.lkas11, sys_warning,
                                                 sys_state, CC.enabled, hud_control.leftLaneVisible, hud_control.rightLaneVisible, left_lane_warning, right_lane_warning, 1))
 
-    if self.frame % 2 and CS.mdps_bus: # send clu11 to mdps if it is not on bus 0
-      can_sends.append(hyundaican.create_clu11(self.packer, CS.mdps_bus, CS.clu11, Buttons.NONE, enabled_speed))
+    if self.frame % 2 and CS.eps_bus: # send clu11 to eps if it is not on bus 0
+      can_sends.append(hyundaican.create_clu11(self.packer, CS.eps_bus, CS.clu11, Buttons.NONE, enabled_speed))
 
     #if pcm_cancel_cmd and self.longcontrol:
     #  can_sends.append(hyundaican.create_clu11(self.packer, CS.scc_bus, CS.clu11, Buttons.CANCEL, clu11_speed))
 
-    if CS.mdps_bus:  # send mdps12 to LKAS to prevent LKAS error
+    if CS.eps_bus:  # send mdps12 to LKAS to prevent LKAS error
       can_sends.append(hyundaican.create_mdps12(self.packer, self.frame, CS.mdps12))
 
     self.update_auto_resume(CC, CS, clu11_speed, can_sends)
@@ -203,12 +193,12 @@ class CarController:
     if self.longcontrol and CS.cruiseState_enabled and (CS.scc_bus or not self.scc_live):
       if self.frame % 2 == 0:
         set_speed = hud_control.setSpeed
-        if not (min_set_speed < set_speed < 255 * CV.KPH_TO_MS):
-          set_speed = min_set_speed
-        set_speed *= CV.MS_TO_KPH if CS.metric else CV.MS_TO_MPH
+        if not (MIN_SET_SPEED < set_speed < 255 * CV.KPH_TO_MS):
+          set_speed = MIN_SET_SPEED
+        set_speed *= CV.MS_TO_KPH if CS.is_metric else CV.MS_TO_MPH
 
         stopping = (actuators.longControlState == LongCtrlState.stopping)
-        apply_accel = self.scc_smoother.get_apply_accel(CS, controls.sm, actuators.accel, stopping)
+        apply_accel = self.scc_smoother.get_apply_accel(CS, actuators.accel)
         apply_accel = clip(apply_accel if CC.longActive else 0,
                            CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX)
         self.accel = apply_accel
@@ -218,7 +208,7 @@ class CarController:
         self.scc12_cnt += 1
         self.scc12_cnt %= 0xF
 
-        can_sends.append(hyundaican.create_scc11(self.packer, self.frame, CC.enabled, set_speed, hud_control.leadVisible, self.scc_live, CS.scc11))
+        can_sends.append(hyundaican.create_scc11(self.packer, self.frame, CC.enabled, set_speed, self.scc_live, CS.scc11))
 
         can_sends.append(hyundaican.create_scc12(self.packer, apply_accel, CC.enabled, self.scc12_cnt, self.scc_live, CS.scc12,
                                                  CS.out.gasPressed, CS.out.brakePressed, CS.out.cruiseState.standstill, self.CP.carFingerprint))
@@ -281,7 +271,7 @@ class CarController:
         # cruise standstill resume
       elif CC.cruiseControl.resume:
         if not (self.CP.flags & HyundaiFlags.CANFD_ALT_BUTTONS):
-          can_sends.append(hyundaicanfd.create_buttons(self.packer, CS.buttons_counter+1, Buttons.RES_ACCEL))
+          can_sends.append(hyundaicanfd.create_buttons(self.packer, CS.buttons_counter + 1, Buttons.RES_ACCEL))
           self.last_button_frame = self.frame
 
     new_actuators = actuators.copy()

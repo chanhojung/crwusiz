@@ -1,15 +1,15 @@
 import copy
 import random
-from math import sqrt
 
 import numpy as np
-from common.numpy_fast import clip, interp, mean
+
 from cereal import car
 from common.conversions import Conversions as CV
-from selfdrive.car.hyundai.values import Buttons
+from common.numpy_fast import clip, interp
 from common.params import Params
-from selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, V_CRUISE_MIN, V_CRUISE_DELTA_KM, V_CRUISE_DELTA_MI, CONTROL_N
-from selfdrive.controls.lib.lane_planner import TRAJECTORY_SIZE
+from selfdrive.car.hyundai.values import Buttons
+from selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, V_CRUISE_MIN, V_CRUISE_DELTA_KM, V_CRUISE_DELTA_MI
+from selfdrive.controls.lib.lateral_planner import TRAJECTORY_SIZE
 from selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import AUTO_TR_CRUISE_GAP
 from selfdrive.road_speed_limiter import get_road_speed_limiter
 
@@ -52,14 +52,18 @@ class SccSmoother:
       WaitIndex = 0
     return count
 
+
   def kph_to_clu(self, kph):
     return int(kph * CV.KPH_TO_MS * self.speed_conv_to_clu)
+
 
   def __init__(self):
     self.btn = Buttons.NONE
 
-    self.longcontrol = Params().get("LongControlSelect", encoding='utf8') == "1"
-    self.is_metric = Params().get_bool('IsMetric')
+    self.params = Params()
+    self.read_param()
+
+    self.param_read_counter = 0
 
     self.speed_conv_to_ms = CV.KPH_TO_MS if self.is_metric else CV.MPH_TO_MS
     self.speed_conv_to_clu = CV.MS_TO_KPH if self.is_metric else CV.MS_TO_MPH
@@ -83,6 +87,13 @@ class SccSmoother:
     self.over_speed_limit = False
     self.limited_lead = False
 
+
+  def read_param(self):
+    self.longcontrol = self.params.get_bool("LongControl")
+    self.is_metric = self.params.get_bool("IsMetric")
+    self.e2e_long = self.params.get_bool("EndToEndLong")
+
+
   def reset(self):
     self.btn = Buttons.NONE
 
@@ -103,8 +114,10 @@ class SccSmoother:
     values["CF_Clu_AliveCnt1"] = (values["CF_Clu_AliveCnt1"] + 1) % 0x10
     return packer.make_can_msg("CLU11", bus, values)
 
+
   def is_active(self, frame):
     return frame - self.started_frame <= max(ALIVE_COUNT) + max(WAIT_COUNT)
+
 
   def inject_events(self, events):
     if self.slowing_down_sound_alert:
@@ -113,16 +126,15 @@ class SccSmoother:
     elif self.slowing_down_alert:
       events.add(EventName.slowingDownSpeed)
 
+
   def cal_max_speed(self, frame, CC, CS, sm, clu11_speed, controls):
     # kph
     road_speed_limiter = get_road_speed_limiter()
     apply_limit_speed, road_limit_speed, left_dist, first_started = road_speed_limiter.get_max_speed(clu11_speed, self.is_metric)
 
-    curv_limit = 0
     self.cal_curve_speed(sm, CS.out.vEgo, frame)
     if self.curve_speed_ms >= MIN_CURVE_SPEED:
       max_speed_clu = min(controls.v_cruise_kph * CV.KPH_TO_MS, self.curve_speed_ms) * self.speed_conv_to_clu
-      curv_limit = int(max_speed_clu)
     else:
       max_speed_clu = self.kph_to_clu(controls.v_cruise_kph)
 
@@ -136,7 +148,6 @@ class SccSmoother:
     if apply_limit_speed >= self.kph_to_clu(10):
       if first_started:
         self.max_speed_clu = clu11_speed
-
       max_speed_clu = min(max_speed_clu, apply_limit_speed)
 
       if clu11_speed > apply_limit_speed:
@@ -161,11 +172,15 @@ class SccSmoother:
     else:
       self.limited_lead = False
 
-    self.update_max_speed(int(max_speed_clu + 0.5), curv_limit != 0 and curv_limit == int(max_speed_clu))
+    self.update_max_speed(int(max_speed_clu + 0.5))
 
     return road_limit_speed, left_dist
 
   def update(self, enabled, can_sends, packer, CC, CS, frame, controls):
+    if self.param_read_counter % 100 == 0:
+      self.read_param()
+    self.param_read_counter += 1
+
     # mph or kph
     clu11_speed = CS.clu11["CF_Clu_Vanz"]
     road_limit_speed, left_dist = self.cal_max_speed(frame, CC, CS, controls.sm, clu11_speed, controls)
@@ -250,7 +265,6 @@ class SccSmoother:
     return 0
 
   def cal_curve_speed(self, sm, v_ego, frame):
-
     if frame % 20 == 0:
       md = sm['modelV2']
       if len(md.position.x) == TRAJECTORY_SIZE and len(md.position.y) == TRAJECTORY_SIZE:
@@ -264,7 +278,7 @@ class SccSmoother:
         curv = curv[start:min(start+10, TRAJECTORY_SIZE)]
         a_y_max = 2.975 - v_ego * 0.0375  # ~1.85 @ 75mph, ~2.6 @ 25mph
         v_curvature = np.sqrt(a_y_max / np.clip(np.abs(curv), 1e-4, None))
-        model_speed = np.mean(v_curvature) * 0.8
+        model_speed = np.mean(v_curvature) * 0.85
 
         if model_speed < v_ego:
           self.curve_speed_ms = float(max(model_speed, MIN_CURVE_SPEED))
@@ -293,16 +307,18 @@ class SccSmoother:
           set_speed = clip(clu11_speed + SYNC_MARGIN, self.min_set_speed_clu, self.max_set_speed_clu)
           self.target_speed = set_speed
 
-  def update_max_speed(self, max_speed, limited_curv):
+  def update_max_speed(self, max_speed):
     if not self.longcontrol or self.max_speed_clu <= 0:
       self.max_speed_clu = max_speed
     else:
-      kp = 0.01 #if limited_curv else 0.01
+      kp = 0.01
       error = max_speed - self.max_speed_clu
       self.max_speed_clu = self.max_speed_clu + error * kp
 
-  def get_apply_accel(self, CS, sm, accel, stopping):
-    start_boost = interp(CS.out.vEgo, [0.0, CREEP_SPEED, 2 * CREEP_SPEED], [0.6, 0.6, 0.0])
+  def get_apply_accel(self, CS, accel):
+    boost_v = 0.2 if self.e2e_long else 0.5
+
+    start_boost = interp(CS.out.vEgo, [CREEP_SPEED, 2 * CREEP_SPEED], [boost_v, 0.0])
     is_accelerating = interp(accel, [0.0, 0.2], [0.0, 1.0])
     boost = start_boost * is_accelerating
     accel += boost

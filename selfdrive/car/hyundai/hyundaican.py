@@ -1,7 +1,7 @@
 import copy
 
 import crcmod
-from selfdrive.car.hyundai.values import CAR, CHECKSUM, EV_HYBRID_CAR
+from selfdrive.car.hyundai.values import CAR, CHECKSUM, EV_HEV_CAR
 from common.params import Params
 
 hyundai_checksum = crcmod.mkCrcFun(0x11D, initCrc=0xFD, rev=False, xorOut=0xdf)
@@ -20,22 +20,16 @@ def create_lkas11(packer, frame, car_fingerprint, apply_steer, steer_req, cut_st
   values["CF_Lkas_MsgCount"] = frame % 0x10
   values["CF_Lkas_Chksum"] = 0
 
-  if Params().get("MfcSelect", encoding='utf8') == "0": # This field is LKAS Mfc car ( qt ui toggle set )
-    if car_fingerprint == CAR.GENESIS:
-      values["CF_Lkas_LdwsActivemode"] = 2
-      values["CF_Lkas_SysWarning"] = lkas11["CF_Lkas_SysWarning"]
-    elif car_fingerprint in [CAR.K5, CAR.K5_HEV, CAR.K7, CAR.K7_HEV]:
-      values["CF_Lkas_LdwsActivemode"] = 0
-      values["CF_Lkas_LdwsSysState"] = 3 if enabled else 1
-      values["CF_Lkas_LdwsOpt_USM"] = 2  # non-2 changes above SysState definition
-      values["CF_Lkas_FcwOpt_USM"] = 0
+  if car_fingerprint == CAR.GENESIS:
+    values["CF_Lkas_LdwsActivemode"] = 2
+    values["CF_Lkas_SysWarning"] = lkas11["CF_Lkas_SysWarning"]
 
-  if Params().get("MfcSelect", encoding='utf8') == "1": # This field is LDWS Mfc car ( qt ui toggle set )
+  elif Params().get("MfcSelect", encoding='utf8') == "1": # This field is LDWS & LKAS Mfc car ( qt ui toggle set )
     values["CF_Lkas_LdwsActivemode"] = 0
     values["CF_Lkas_LdwsOpt_USM"] = 3
     values["CF_Lkas_FcwOpt_USM"] = 2 if enabled else 1
 
-  if Params().get("MfcSelect", encoding='utf8') == "2": # This field is LFA Mfc car ( qt ui toggle set )
+  elif Params().get("MfcSelect", encoding='utf8') == "2": # This field is LFA Mfc car ( qt ui toggle set )
     values["CF_Lkas_LdwsActivemode"] = int(left_lane) + (int(right_lane) << 1)
     values["CF_Lkas_LdwsOpt_USM"] = 2
     values["CF_Lkas_FcwOpt_USM"] = 2 if enabled else 1
@@ -108,7 +102,7 @@ def create_mdps12(packer, frame, mdps12):
   return packer.make_can_msg("MDPS12", 2, values)
 
 
-def create_scc11(packer, frame, enabled, set_speed, lead_visible, scc_live, scc11):
+def create_scc11(packer, frame, enabled, set_speed, scc_live, scc11):
   values = copy.copy(scc11)
   values["AliveCounterACC"] = frame // 2 % 0x10
 
@@ -125,7 +119,7 @@ def create_scc11(packer, frame, enabled, set_speed, lead_visible, scc_live, scc1
 def create_scc12(packer, apply_accel, enabled, cnt, scc_live, scc12, gaspressed, brakepressed, standstill, car_fingerprint):
   values = copy.copy(scc12)
 
-  if car_fingerprint in EV_HYBRID_CAR:
+  if car_fingerprint in EV_HEV_CAR:
     if enabled and not brakepressed:
       values["ACCMode"] = 2 if gaspressed and (apply_accel > -0.2) else 1
       if apply_accel < 0.0 and standstill:

@@ -1,16 +1,21 @@
 const SteeringLimits HYUNDAI_STEERING_LIMITS = {
-  .max_steer = 409,
+  .max_steer = 384,
   .max_rt_delta = 112,
   .max_rt_interval = 250000,
-  .max_rate_up = 5,
+  .max_rate_up = 3,
   .max_rate_down = 7,
   .driver_torque_allowance = 50,
   .driver_torque_factor = 2,
   .type = TorqueDriverLimited,
+
+  // the EPS faults when the steering angle is above a certain threshold for too long. to prevent this,
+  // we allow setting CF_Lkas_ActToi bit to 0 while maintaining the requested torque value for a single frame
+  .min_valid_request_frames = 39,
+  .min_valid_request_rt_interval = 360000,  // 450ms; a ~10% buffer on cutting every 40 frames
+  .has_steer_req_tolerance = true,
 };
 
 const int HYUNDAI_STANDSTILL_THRSLD = 30;  // ~1kph
-
 const int HYUNDAI_MAX_ACCEL = 200;  // 1/100 m/s2
 const int HYUNDAI_MIN_ACCEL = -350; // 1/100 m/s2
 

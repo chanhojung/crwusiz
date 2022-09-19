@@ -278,7 +278,7 @@ void NvgWindow::updateState(const UIState &s) {
   setProperty("autoTrGap", cc.getSccSmoother().getAutoTrGap());
   setProperty("lateralcontrol", cs.getLateralControlSelect());
   setProperty("steerRatio", lp.getSteerRatio());
-  setProperty("mdpsBus", cp.getMdpsBus());
+  setProperty("epsBus", cp.getEpsBus());
   setProperty("sccBus", cp.getSccBus());
   setProperty("fl", ce.getTpms().getFl());
   setProperty("fr", ce.getTpms().getFr());
@@ -588,8 +588,8 @@ void NvgWindow::drawHud(QPainter &p) {
   const char* lateral[] = {"Pid", "Indi", "Lqr", "Torque"};
 
   QString infoText;
-  infoText.sprintf("[ %s ] SR[%.2f] MDPS[%d] SCC[%d]",
-    lateral[lateralcontrol], steerRatio, mdpsBus, sccBus
+  infoText.sprintf("[ %s ] SR[%.2f] EPS[%d] SCC[%d]",
+    lateral[lateralcontrol], steerRatio, epsBus, sccBus
   );
 
   x = rect().left() + radius * 1.8;
@@ -897,9 +897,8 @@ void NvgWindow::drawLaneLines(QPainter &painter, const UIState *s) {
 
   // paint path
   QLinearGradient bg(0, height(), 0, height() / 4);
-  // wirelessnet2's rainbow barf path
-  if (scene.engaged && !scene.end_to_end) {
-    // openpilot is not disengaged
+  float start_hue, end_hue;
+  if (scene.engaged) {
     if (scene.steeringPressed) {
       // The user is applying torque to the steering wheel
       bg.setColorAt(0, steeringpressedColor(200));
@@ -907,36 +906,38 @@ void NvgWindow::drawLaneLines(QPainter &painter, const UIState *s) {
     } else if (scene.override) {
       bg.setColorAt(0, overrideColor(200));
       bg.setColorAt(1, overrideColor(0));
-    } else {
-      // Draw colored track
-      int torqueScale = (int)std::fabs(510 * (float)scene.output_scale);
-      int r_lvl = std::fmin(255, torqueScale);
-      int g_lvl = std::fmin(255, 510 - torqueScale);
-      bg.setColorAt(0, QColor(r_lvl, g_lvl, 0, 200));
-      bg.setColorAt(1, QColor((int)(0.5 * r_lvl), (int)(0.5 * g_lvl), 0, 0));
-    }
-  } else if (scene.engaged && scene.end_to_end) {
-    const auto &orientation = (*s->sm)["modelV2"].getModelV2().getOrientation();
-    float orientation_future = 0;
-    if (orientation.getZ().size() > 16) {
-      orientation_future = std::abs(orientation.getZ()[16]);  // 2.5 seconds
-    }
-    // straight: 112, in turns: 70
-    float curve_hue = fmax(70, 112 - (orientation_future * 420));
-    // FIXME: painter.drawPolygon can be slow if hue is not rounded
-    curve_hue = int(curve_hue * 100 + 0.5) / 100;
+    } else if (scene.end_to_end_long) {
+      const auto &acceleration = (*s->sm)["modelV2"].getModelV2().getAcceleration();
+      float acceleration_future = 0;
+      if (acceleration.getZ().size() > 16) {
+        acceleration_future = acceleration.getX()[16];  // 2.5 seconds
+      }
+      start_hue = 60;
+      // speed up: 120, slow down: 0
+      end_hue = fmax(fmin(start_hue + acceleration_future * 30, 120), 0);
 
-    if (scene.steeringPressed) {
-      // The user is applying torque to the steering wheel
-      bg.setColorAt(0, steeringpressedColor(200));
-      bg.setColorAt(1, steeringpressedColor(0));
-    } else if (scene.override) {
-      bg.setColorAt(0, overrideColor(200));
-      bg.setColorAt(1, overrideColor(0));
+      // FIXME: painter.drawPolygon can be slow if hue is not rounded
+      end_hue = int(end_hue * 100 + 0.5) / 100;
+
+      bg.setColorAt(0.0, QColor::fromHslF(start_hue / 360., 0.97, 0.56, 0.4));
+      bg.setColorAt(0.5, QColor::fromHslF(end_hue / 360., 1.0, 0.68, 0.35));
+      bg.setColorAt(1.0, QColor::fromHslF(end_hue / 360., 1.0, 0.68, 0.0));
     } else {
-      bg.setColorAt(0.0, QColor::fromHslF(148 / 360., 0.94, 0.51, 0.4));
-      bg.setColorAt(0.5, QColor::fromHslF(curve_hue / 360., 1.0, 0.68, 0.2));
-      bg.setColorAt(1.0, QColor::fromHslF(curve_hue / 360., 1.0, 0.68, 0.0));
+      const auto &orientation = (*s->sm)["modelV2"].getModelV2().getOrientation();
+      float orientation_future = 0;
+      if (orientation.getZ().size() > 16) {
+        orientation_future = std::abs(orientation.getZ()[16]);  // 2.5 seconds
+      }
+      start_hue = 148;
+      // straight: 112, in turns: 70
+      end_hue = fmax(70, 112 - (orientation_future * 420));
+
+      // FIXME: painter.drawPolygon can be slow if hue is not rounded
+      end_hue = int(end_hue * 100 + 0.5) / 100;
+
+      bg.setColorAt(0.0, QColor::fromHslF(start_hue / 360., 0.94, 0.51, 0.4));
+      bg.setColorAt(0.5, QColor::fromHslF(end_hue / 360., 1.0, 0.68, 0.35));
+      bg.setColorAt(1.0, QColor::fromHslF(end_hue / 360., 1.0, 0.68, 0.0));
     }
   } else {
     bg.setColorAt(0, whiteColor(200));

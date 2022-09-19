@@ -150,10 +150,7 @@ struct FrameData {
 
   transform @10 :List(Float32);
 
-  androidCaptureResult @9 :AndroidCaptureResult;
-
   image @6 :Data;
-  globalGainDEPRECATED @5 :Int32;
 
   temperaturesC @24 :List(Float32);
 
@@ -164,6 +161,15 @@ struct FrameData {
     front @3;
   }
 
+  sensor @26 :ImageSensor;
+  enum ImageSensor {
+    unknown @0;
+    ar0321 @1;
+    ox03c10 @2;
+  }
+
+  globalGainDEPRECATED @5 :Int32;
+  androidCaptureResultDEPRECATED @9 :AndroidCaptureResult;
   struct AndroidCaptureResult {
     sensitivity @0 :Int32;
     frameDuration @1 :Int64;
@@ -220,9 +226,9 @@ struct SensorEventData {
     fiber @2;
     velodyne @3;  # Velodyne IMU
     bno055 @4;    # Bosch accelerometer
-    lsm6ds3 @5;   # accelerometer (c2)
-    bmp280 @6;    # barometer (c2)
-    mmc3416x @7;  # magnetometer (c2)
+    lsm6ds3 @5;   # includes LSM6DS3 and LSM6DS3TR, TR = tape reel
+    bmp280 @6;    # barometer
+    mmc3416x @7;  # magnetometer
     bmx055 @8;
     rpr0521 @9;
     lsm6ds3trc @10;
@@ -457,6 +463,7 @@ struct PandaState @0xa7649e2575e4591e {
     uno @5;
     dos @6;
     redPanda @7;
+    redPandaV2 @8;
   }
 
   enum HarnessStatus {
@@ -612,7 +619,7 @@ struct ControlsState @0x97ff69c53601abf1 {
     preEnabled @1;
     enabled @2;
     softDisabling @3;
-    overriding @4;  # superset of overriding openpilot with steering or gas
+    overriding @4;  # superset of overriding with steering or accelerator
   }
 
   enum AlertStatus {
@@ -921,11 +928,11 @@ struct LongitudinalPlan @0xe00b5b3eba12876c {
 
 struct LateralPlan @0xe1e9318e2ae8b51e {
   modelMonoTime @31 :UInt64;
-  laneWidth @0 :Float32;
-  lProb @5 :Float32;
-  rProb @7 :Float32;
+  laneWidthDEPRECATED @0 :Float32;
+  lProbDEPRECATED @5 :Float32;
+  rProbDEPRECATED @7 :Float32;
   dPathPoints @20 :List(Float32);
-  dProb @21 :Float32;
+  dProbDEPRECATED @21 :Float32;
 
   mpcSolutionValid @9 :Bool;
   desire @17 :Desire;
@@ -1759,6 +1766,22 @@ struct LiveParametersData {
   roll @14 :Float32;
 }
 
+struct LiveTorqueParametersData {
+  liveValid @0 :Bool;
+  latAccelFactorRaw @1 :Float32;
+  latAccelOffsetRaw @2 :Float32;
+  frictionCoefficientRaw @3 :Float32;
+  latAccelFactorFiltered @4 :Float32;
+  latAccelOffsetFiltered @5 :Float32;
+  frictionCoefficientFiltered @6 :Float32;
+  totalBucketPoints @7 :Float32;
+  decay @8 :Float32;
+  maxResets @9 :Float32;
+  points @10 :List(List(Float32));
+  version @11 :Int32;
+  useParams @12 :Bool;
+}
+
 struct LiveMapDataDEPRECATED {
   speedLimitValid @0 :Bool;
   speedLimit @1 :Float32;
@@ -1875,19 +1898,22 @@ struct EncodeData {
   unixTimestampNanos @3 :UInt64;
 }
 
-struct RoadLimitSpeed {
-  active @0 :Int16;
-  roadLimitSpeed @1 :Int16;
-  isHighway @2 :Bool;
-  camType @3 :Int16;
-  camLimitSpeedLeftDist @4 :Int16;
-  camLimitSpeed @5 :Int16;
-  sectionLimitSpeed @6 :Int16;
-  sectionLeftDist @7 :Int16;
-  camSpeedFactor @8 :Float32;
+struct UserFlag {
 }
 
-struct UserFlag {
+struct RoadLimitSpeed {
+    active @0 :Int16;
+    roadLimitSpeed @1 :Int16;
+    isHighway @2 :Bool;
+    camType @3 :Int16;
+    camLimitSpeedLeftDist @4 :Int16;
+    camLimitSpeed @5 :Int16;
+    sectionLimitSpeed @6 :Int16;
+    sectionLeftDist @7 :Int16;
+    sectionAvgSpeed @8 :Int16;
+    sectionLeftTime @9 :Int16;
+    sectionAdjustSpeed @10 :Bool;
+    camSpeedFactor @11 :Float32;
 }
 
 struct Event {
@@ -1924,6 +1950,7 @@ struct Event {
     gpsLocation @21 :GpsLocationData;
     gnssMeasurements @91 :GnssMeasurements;
     liveParameters @61 :LiveParametersData;
+    liveTorqueParameters @94 :LiveTorqueParametersData;
     cameraOdometry @63 :CameraOdometry;
     thumbnail @66: Thumbnail;
     carEvents @68: List(Car.CarEvent);
@@ -1961,7 +1988,7 @@ struct Event {
     userFlag @93 :UserFlag;
 
     # neokii
-    roadLimitSpeed @94 :RoadLimitSpeed;
+    roadLimitSpeed @95 :RoadLimitSpeed;
 
     # *********** debug ***********
     testJoystick @52 :Joystick;

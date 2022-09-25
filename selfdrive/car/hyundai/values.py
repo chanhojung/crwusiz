@@ -17,7 +17,7 @@ class CarControllerParams:
   ACCEL_MAX = 2.0 # m/s
 
   def __init__(self, CP):
-    self.STEER_MAX = 409
+    self.STEER_MAX = 384
     self.STEER_DELTA_UP = 3
     self.STEER_DELTA_DOWN = 7
     self.STEER_DRIVER_ALLOWANCE = 50
@@ -1479,19 +1479,19 @@ DBC = {
   CAR.ELANTRA_I30: dbc_dict('hyundai_kia_generic', None),
   CAR.ELANTRA21: dbc_dict('hyundai_kia_generic', None),
   CAR.ELANTRA21_HEV: dbc_dict('hyundai_kia_generic', None),
-  CAR.SONATA: dbc_dict('hyundai_kia_generic', 'hyundai_kia_mando_front_radar'),
-  CAR.SONATA_HEV: dbc_dict('hyundai_kia_generic', 'hyundai_kia_mando_front_radar'),
+  CAR.SONATA: dbc_dict('hyundai_kia_generic', 'hyundai_kia_mando_front_radar_generated'),
+  CAR.SONATA_HEV: dbc_dict('hyundai_kia_generic', 'hyundai_kia_mando_front_radar_generated'),
   CAR.SONATA_LF: dbc_dict('hyundai_kia_generic', None),
   CAR.SONATA_LF_HEV: dbc_dict('hyundai_kia_generic', None),
   CAR.KONA: dbc_dict('hyundai_kia_generic', None),
   CAR.KONA_EV: dbc_dict('hyundai_kia_generic', None),
   CAR.KONA_HEV: dbc_dict('hyundai_kia_generic', None),
-  CAR.IONIQ_EV: dbc_dict('hyundai_kia_generic', 'hyundai_kia_mando_front_radar'),
+  CAR.IONIQ_EV: dbc_dict('hyundai_kia_generic', 'hyundai_kia_mando_front_radar_generated'),
   CAR.IONIQ_HEV: dbc_dict('hyundai_kia_generic', None),
   CAR.TUCSON: dbc_dict('hyundai_kia_generic', None),
-  CAR.SANTAFE: dbc_dict('hyundai_kia_generic', 'hyundai_kia_mando_front_radar'),
+  CAR.SANTAFE: dbc_dict('hyundai_kia_generic', 'hyundai_kia_mando_front_radar_generated'),
   CAR.SANTAFE_HEV: dbc_dict('hyundai_kia_generic', None),
-  CAR.PALISADE: dbc_dict('hyundai_kia_generic', 'hyundai_kia_mando_front_radar'),
+  CAR.PALISADE: dbc_dict('hyundai_kia_generic', 'hyundai_kia_mando_front_radar_generated'),
   CAR.VELOSTER: dbc_dict('hyundai_kia_generic', None),
   CAR.GRANDEUR: dbc_dict('hyundai_kia_generic', None),
   CAR.GRANDEUR_HEV: dbc_dict('hyundai_kia_generic', None),
@@ -1512,14 +1512,14 @@ DBC = {
   CAR.SORENTO: dbc_dict('hyundai_kia_generic', None),
   CAR.MOHAVE: dbc_dict('hyundai_kia_generic', None),
   CAR.STINGER: dbc_dict('hyundai_kia_generic', None),
-  CAR.NIRO_EV: dbc_dict('hyundai_kia_generic', 'hyundai_kia_mando_front_radar'),
-  CAR.NIRO_HEV: dbc_dict('hyundai_kia_generic', 'hyundai_kia_mando_front_radar'),
+  CAR.NIRO_EV: dbc_dict('hyundai_kia_generic', 'hyundai_kia_mando_front_radar_generated'),
+  CAR.NIRO_HEV: dbc_dict('hyundai_kia_generic', 'hyundai_kia_mando_front_radar_generated'),
   CAR.SOUL_EV: dbc_dict('hyundai_kia_generic', None),
   CAR.SELTOS: dbc_dict('hyundai_kia_generic', None),
 
   # Genesis
   CAR.GENESIS: dbc_dict('hyundai_kia_generic', None),
-  CAR.GENESIS_G70: dbc_dict('hyundai_kia_generic', 'hyundai_kia_mando_front_radar'),
+  CAR.GENESIS_G70: dbc_dict('hyundai_kia_generic', 'hyundai_kia_mando_front_radar_generated'),
   CAR.GENESIS_G80: dbc_dict('hyundai_kia_generic', None),
   CAR.GENESIS_G90: dbc_dict('hyundai_kia_generic', None),
 

@@ -39,6 +39,10 @@ class LatControlTorque(LatControl):
     if CS.vEgo < MIN_STEER_SPEED or not active:
       output_torque = 0.0
       pid_log.active = False
+      angle_steers_des = 0.0
+      pid_log.latAccelFactor = self.torque_params.latAccelFactor
+      pid_log.latAccelOffset = self.torque_params.latAccelOffset
+      pid_log.friction = self.torque_params.friction
     else:
       if self.use_steering_angle:
         actual_curvature = -VM.calc_curvature(math.radians(CS.steeringAngleDeg - params.angleOffsetDeg), CS.vEgo, params.roll)
@@ -51,7 +55,7 @@ class LatControlTorque(LatControl):
       desired_lateral_accel = desired_curvature * CS.vEgo ** 2
 
       # desired rate is the desired rate of change in the setpoint, not the absolute desired curvature
-      #desired_lateral_jerk = desired_curvature_rate * CS.vEgo ** 2
+      # desired_lateral_jerk = desired_curvature_rate * CS.vEgo ** 2
       actual_lateral_accel = actual_curvature * CS.vEgo ** 2
       lateral_accel_deadzone = curvature_deadzone * CS.vEgo ** 2
 
@@ -79,5 +83,11 @@ class LatControlTorque(LatControl):
       pid_log.desiredLateralAccel = desired_lateral_accel
       pid_log.saturated = self._check_saturation(self.steer_max - abs(output_torque) < 1e-3, CS, steer_limited)
 
+      pid_log.latAccelFactor = self.torque_params.latAccelFactor
+      pid_log.latAccelOffset = self.torque_params.latAccelOffset
+      pid_log.friction = self.torque_params.friction
+
+      angle_steers_des = math.degrees(VM.get_steer_from_curvature(-desired_curvature, CS.vEgo, params.roll)) + params.angleOffsetDeg
+
     # TODO left is positive in this convention
-    return -output_torque, 0.0, pid_log
+    return -output_torque, angle_steers_des, pid_log

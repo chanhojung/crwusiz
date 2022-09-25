@@ -144,7 +144,8 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"LastUpdateException", CLEAR_ON_MANAGER_START},
     {"LastUpdateTime", PERSISTENT},
     {"LiveParameters", PERSISTENT},
-    {"MapboxToken", PERSISTENT | DONT_LOG},
+    {"LiveTorqueCarParams", PERSISTENT},
+    {"LiveTorqueParameters", PERSISTENT | DONT_LOG},
     {"NavDestination", CLEAR_ON_MANAGER_START | CLEAR_ON_IGNITION_OFF},
     {"NavSettingTime24h", PERSISTENT},
     {"NavSettingLeftSide", PERSISTENT},
@@ -195,7 +196,6 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"Offroad_UpdateFailed", CLEAR_ON_MANAGER_START},
 
     // add
-    {"LongControl", PERSISTENT},
     {"MfcSelect", PERSISTENT},
     {"AebSelect", PERSISTENT},
     {"LateralControlSelect", PERSISTENT},
@@ -212,10 +212,8 @@ std::unordered_map<std::string, uint32_t> keys = {
 
 
 Params::Params(const std::string &path) {
-  const char* env = std::getenv("OPENPILOT_PREFIX");
-  prefix = env ? "/" + std::string(env) : "/d";
-  std::string default_param_path = ensure_params_path(prefix);
-  params_path = path.empty() ? default_param_path : ensure_params_path(prefix, path);
+  prefix = "/" + util::getenv("OPENPILOT_PREFIX", "d");
+  params_path = ensure_params_path(prefix, path);
 }
 
 std::vector<std::string> Params::allKeys() const {

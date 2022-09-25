@@ -402,9 +402,9 @@ struct PandaState @0xa7649e2575e4591e {
   ignitionLine @2 :Bool;
   controlsAllowed @3 :Bool;
   gasInterceptorDetected @4 :Bool;
-  canSendErrs @7 :UInt32;
-  canFwdErrs @8 :UInt32;
-  canRxErrs @19 :UInt32;
+  rxBufferOverflow @7 :UInt32;
+  txBufferOverflow @8 :UInt32;
+  safetyRxInvalid @19 :UInt32;
   gmlanSendErrs @9 :UInt32;
   pandaType @10 :PandaType;
   ignitionCan @13 :Bool;
@@ -417,9 +417,13 @@ struct PandaState @0xa7649e2575e4591e {
   faults @18 :List(FaultType);
   harnessStatus @21 :HarnessStatus;
   heartbeatLost @22 :Bool;
-  blockedCnt @24 :UInt32;
+  safetyTxBlocked @24 :UInt32;
   interruptLoad @25 :Float32;
   fanPower @28 :UInt8;
+
+  canState0 @29 :PandaCanState;
+  canState1 @30 :PandaCanState;
+  canState2 @31 :PandaCanState;
 
   enum FaultStatus {
     none @0;
@@ -480,6 +484,40 @@ struct PandaState @0xa7649e2575e4591e {
   usbPowerModeDEPRECATED @12 :PeripheralState.UsbPowerModeDEPRECATED;
   safetyParamDEPRECATED @20 :Int16;
   safetyParam2DEPRECATED @26 :UInt32;
+
+  struct PandaCanState {
+    busOff @0 :Bool;
+    busOffCnt @1 :UInt32;
+    errorWarning @2 :Bool;
+    errorPassive @3 :Bool;
+    lastError @4 :LecErrorCode;
+    lastStoredError @5 :LecErrorCode;
+    lastDataError @6 :LecErrorCode;
+    lastDataStoredError @7 :LecErrorCode;
+    receiveErrorCnt @8 :UInt8;
+    transmitErrorCnt @9 :UInt8;
+    totalErrorCnt @10 :UInt32;
+    totalTxLostCnt @11 :UInt32;
+    totalRxLostCnt @12 :UInt32;
+    totalTxCnt @13 :UInt32;
+    totalRxCnt @14 :UInt32;
+    totalFwdCnt @15 :UInt32;
+    canSpeed @16 :UInt16;
+    canDataSpeed @17 :UInt16;
+    canfdEnabled @18 :Bool;
+    brsEnabled @19 :Bool;
+
+    enum LecErrorCode {
+      noError @0;
+      stuffError @1;
+      formError @2;
+      ackError @3;
+      bit1Error @4;
+      bit0Error @5;
+      crcError @6;
+      noChange @7;
+    }
+  }
 }
 
 struct PeripheralState {
@@ -676,6 +714,9 @@ struct ControlsState @0x97ff69c53601abf1 {
     saturated @7 :Bool;
     actualLateralAccel @9 :Float32;
     desiredLateralAccel @10 :Float32;
+    latAccelFactor @11 :Float32;
+    latAccelOffset @12 :Float32;
+    friction @13 :Float32;
    }
 
   struct LateralLQRState {
@@ -762,6 +803,9 @@ struct ModelDataV2 {
   leads @11 :List(LeadDataV2);
   leadsV3 @18 :List(LeadDataV3);
 
+  # predicted stop line
+  stopLine @21 :StopLineData;
+
   meta @12 :MetaData;
 
   # All SI units and in device frame
@@ -804,6 +848,28 @@ struct ModelDataV2 {
     aStd @10 :List(Float32);
   }
 
+  struct StopLineData {
+    prob @0 :Float32;
+
+    x @1 :Float32;
+    xStd @2 :Float32;
+    y @3 :Float32;
+    yStd @4 :Float32;
+    z @5 :Float32;
+    zStd @6 :Float32;
+
+    roll @7 :Float32;
+    rollStd @8 :Float32;
+    pitch @9 :Float32;
+    pitchStd @10 :Float32;
+    yaw @11 :Float32;
+    yawStd @12 :Float32;
+
+    speedAtLine @13 :Float32;
+    speedAtLineStd @14 :Float32;
+    secondsUntilLine @15 :Float32;
+    secondsUntilLineStd @16 :Float32;
+  }
 
   struct MetaData {
     engagedProb @0 :Float32;
@@ -882,6 +948,8 @@ struct LongitudinalPlan @0xe00b5b3eba12876c {
   jerks @34 :List(Float32);
 
   solverExecutionTime @35 :Float32;
+
+  debugLong @36 : Int32;
 
   enum LongitudinalPlanSource {
     cruise @0;

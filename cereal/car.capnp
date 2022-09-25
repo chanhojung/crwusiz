@@ -539,9 +539,7 @@ struct CarParams {
     kpV @1 :List(Float32);
     kiBP @2 :List(Float32);
     kiV @3 :List(Float32);
-    kdBP @4 :List(Float32);
-    kdV @5 :List(Float32);
-    kf @6 :Float32;
+    kf @4 :Float32;
   }
 
   struct LateralTorqueTuning {
@@ -663,6 +661,8 @@ struct CarParams {
     gateway @10; # can gateway
     hud @11; # heads up display
     combinationMeter @12; # instrument cluster
+    electricBrakeBooster @15;
+    adas @19;
 
     # Toyota only
     dsu @6;
@@ -671,7 +671,6 @@ struct CarParams {
     # Honda only
     vsa @13; # Vehicle Stability Assist
     programmedFuelInjection @14;
-    electricBrakeBooster @15;
     shiftByWire @16;
 
     # Chrysler only

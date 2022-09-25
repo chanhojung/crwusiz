@@ -172,6 +172,7 @@ class CarInterfaceBase(ABC):
     tune.torque.friction = params['FRICTION']
     tune.torque.latAccelFactor = params['LAT_ACCEL_FACTOR']
     tune.torque.latAccelOffset = 0.0
+    tune.torque.steeringAngleDeadzoneDeg = steering_angle_deadzone_deg
 
   @abstractmethod
   def _update(self, c: car.CarControl) -> car.CarState:
@@ -197,7 +198,7 @@ class CarInterfaceBase(ABC):
     # Many cars apply hysteresis to the ego dash speed
     if self.CS is not None:
       ret.vEgoCluster = apply_hysteresis(ret.vEgoCluster, self.CS.out.vEgoCluster, self.CS.cluster_speed_hyst_gap)
-      if ret.vEgo < self.CS.cluster_min_speed:
+      if abs(ret.vEgo) < self.CS.cluster_min_speed:
         ret.vEgoCluster = 0.0
 
     if ret.cruiseState.speedCluster == 0:
@@ -221,8 +222,7 @@ class CarInterfaceBase(ABC):
       events.add(EventName.doorOpen)
     if cs_out.seatbeltUnlatched:
       events.add(EventName.seatbeltNotLatched)
-    if cs_out.gearShifter != GearShifter.drive and \
-            (extra_gears is None or cs_out.gearShifter not in extra_gears):
+    if cs_out.gearShifter != GearShifter.drive and (extra_gears is None or cs_out.gearShifter not in extra_gears):
       events.add(EventName.wrongGear)
     if cs_out.gearShifter == GearShifter.reverse:
       events.add(EventName.reverseGear)

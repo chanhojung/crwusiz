@@ -1,13 +1,13 @@
 import copy
 
 import crcmod
-from selfdrive.car.hyundai.values import CAR, CHECKSUM, EV_HEV_CAR
+from selfdrive.car.hyundai.values import CAR, CHECKSUM, EV_CAR, HEV_CAR
 from common.params import Params
 
 hyundai_checksum = crcmod.mkCrcFun(0x11D, initCrc=0xFD, rev=False, xorOut=0xdf)
 
 
-def create_lkas11(packer, frame, car_fingerprint, apply_steer, steer_req, cut_steer_temp, lkas11, sys_warning, sys_state, enabled,
+def create_lkas11(packer, frame, car_fingerprint, apply_steer, steer_req, torque_fault, lkas11, sys_warning, sys_state, enabled,
                   left_lane, right_lane, left_lane_depart, right_lane_depart, bus):
   values = copy.copy(lkas11)
   values["CF_Lkas_LdwsSysState"] = sys_state
@@ -15,8 +15,8 @@ def create_lkas11(packer, frame, car_fingerprint, apply_steer, steer_req, cut_st
   values["CF_Lkas_LdwsLHWarning"] = left_lane_depart
   values["CF_Lkas_LdwsRHWarning"] = right_lane_depart
   values["CR_Lkas_StrToqReq"] = apply_steer
-  values["CF_Lkas_ActToi"] = steer_req and not cut_steer_temp
-  values["CF_Lkas_ToiFlt"] = cut_steer_temp  # seems to allow actuation on CR_Lkas_StrToqReq
+  values["CF_Lkas_ActToi"] = steer_req
+  values["CF_Lkas_ToiFlt"] = torque_fault  # seems to allow actuation on CR_Lkas_StrToqReq
   values["CF_Lkas_MsgCount"] = frame % 0x10
   values["CF_Lkas_Chksum"] = 0
 
@@ -65,7 +65,6 @@ def create_lfahda_mfc(packer, enabled, active):
     "HDA_Icon_State": 2 if active > 0 else 0,
     #"HDA_VSetReq": 0,
   }
-
   return packer.make_can_msg("LFAHDA_MFC", 0, values)
 
 
@@ -81,7 +80,7 @@ def create_hda_mfc(packer, active, CS, left_lane, right_lane):
   values["HDA_LdwSysState"] = ldwSysState
   values["HDA_USM"] = 2
   values["HDA_VSetReq"] = 100
-  values["HDA_Icon_Wheel"] = 1 if active > 1 and CS.out.cruiseState.enabledAcc else 0
+  values["HDA_Icon_Wheel"] = 1 if active > 1 and CS.out.cruiseState.enabled else 0
   values["HDA_Icon_State"] = 2 if active > 1 else 0
   values["HDA_Chime"] = 1 if active > 1 else 0
 
@@ -119,7 +118,7 @@ def create_scc11(packer, frame, enabled, set_speed, scc_live, scc11):
 def create_scc12(packer, apply_accel, enabled, cnt, scc_live, scc12, gaspressed, brakepressed, standstill, car_fingerprint):
   values = copy.copy(scc12)
 
-  if car_fingerprint in EV_HEV_CAR:
+  if car_fingerprint in (EV_CAR | HEV_CAR):
     if enabled and not brakepressed:
       values["ACCMode"] = 2 if gaspressed and (apply_accel > -0.2) else 1
       if apply_accel < 0.0 and standstill:
@@ -152,7 +151,8 @@ def create_scc13(packer, scc13):
 
   return packer.make_can_msg("SCC13", 0, values)
 
-def create_scc14(packer, enabled, e_vgo, standstill, accel, gaspressed, objgap, scc14):
+
+def create_scc14(packer, enabled, v_ego, standstill, accel, gaspressed, objgap, scc14):
   values = copy.copy(scc14)
 
   if enabled:
@@ -163,7 +163,7 @@ def create_scc14(packer, enabled, e_vgo, standstill, accel, gaspressed, objgap, 
       values["JerkLowerLimit"] = 10.
       values["ComfortBandUpper"] = 0.
       values["ComfortBandLower"] = 0.
-      if e_vgo > 0.27:
+      if v_ego > 0.27:
         values["ComfortBandUpper"] = 2.
         values["ComfortBandLower"] = 0.
     else:
@@ -175,8 +175,10 @@ def create_scc14(packer, enabled, e_vgo, standstill, accel, gaspressed, objgap, 
   return packer.make_can_msg("SCC14", 0, values)
 
 
+
+
 # ---------------------------------------------------------------------------------------
-def create_acc_commands(packer, enabled, accel, jerk, idx, lead_visible, set_speed, stopping, gas_pressed):
+def create_acc_commands(packer, enabled, accel, upper_jerk, idx, lead_visible, set_speed, stopping, long_override):
   commands = []
 
   scc11_values = {
@@ -184,16 +186,16 @@ def create_acc_commands(packer, enabled, accel, jerk, idx, lead_visible, set_spe
     "TauGapSet": 4,
     "VSetDis": set_speed if enabled else 0,
     "AliveCounterACC": idx % 0x10,
-    "ObjValid": 0,  # TODO: these two bits may allow for better longitudinal control
-    "ACC_ObjStatus": 0,
+    "ObjValid": 1, # close lead makes controls tighter
+    "ACC_ObjStatus": 1, # close lead makes controls tighter
     "ACC_ObjLatPos": 0,
     "ACC_ObjRelSpd": 0,
-    "ACC_ObjDist": 0,
-  }
+    "ACC_ObjDist": 1, # close lead makes controls tighter
+    }
   commands.append(packer.make_can_msg("SCC11", 0, scc11_values))
 
   scc12_values = {
-    "ACCMode": 2 if enabled and gas_pressed else 1 if enabled else 0,
+    "ACCMode": 2 if enabled and long_override else 1 if enabled else 0,
     "StopReq": 1 if stopping else 0,
     "aReqRaw": accel,
     "aReqValue": accel,  # stock ramps up and down respecting jerk limit until it reaches aReqRaw
@@ -207,29 +209,26 @@ def create_acc_commands(packer, enabled, accel, jerk, idx, lead_visible, set_spe
   scc14_values = {
     "ComfortBandUpper": 0.0, # stock usually is 0 but sometimes uses higher values
     "ComfortBandLower": 0.0, # stock usually is 0 but sometimes uses higher values
-    "JerkUpperLimit": max(jerk, 1.0) if not stopping else 0, # stock usually is 1.0 but sometimes uses higher values
-    "JerkLowerLimit": max(-jerk, 1.0), # stock usually is 0.5 but sometimes uses higher values
-    "ACCMode": 2 if enabled and gas_pressed else 1 if enabled else 4, # stock will always be 4 instead of 0 after first disengage
+    "JerkUpperLimit": upper_jerk, # stock usually is 1.0 but sometimes uses higher values
+    "JerkLowerLimit": 5.0, # stock usually is 0.5 but sometimes uses higher values
+    "ACCMode": 2 if enabled and long_override else 1 if enabled else 4, # stock will always be 4 instead of 0 after first disengage
     "ObjGap": 2 if lead_visible else 0, # 5: >30, m, 4: 25-30 m, 3: 20-25 m, 2: < 20 m, 0: no lead
   }
   commands.append(packer.make_can_msg("SCC14", 0, scc14_values))
 
+  # note that some vehicles most likely have an alternate checksum/counter definition
+  # https://github.com/commaai/opendbc/commit/9ddcdb22c4929baf310295e832668e6e7fcfa602
   fca11_values = {
-    # seems to count 2,1,0,3,2,1,0,3,2,1,0,3,2,1,0,repeat...
-    # (where first value is aligned to Supplemental_Counter == 0)
-    # test: [(idx % 0xF, -((idx % 0xF) + 2) % 4) for idx in range(0x14)]
-    "CR_FCA_Alive": ((-((idx % 0xF) + 2) % 4) << 2) + 1,
-    "Supplemental_Counter": idx % 0xF,
+    "CR_FCA_Alive": idx % 0xF,
     "PAINT1_Status": 1,
     "FCA_DrvSetStatus": 1,
     "FCA_Status": 1, # AEB disabled
   }
   fca11_dat = packer.make_can_msg("FCA11", 0, fca11_values)[2]
-  fca11_values["CR_FCA_ChkSum"] = 0x10 - sum(sum(divmod(i, 16)) for i in fca11_dat) % 0x10
+  fca11_values["CR_FCA_ChkSum"] = hyundai_checksum(fca11_dat[:7])
   commands.append(packer.make_can_msg("FCA11", 0, fca11_values))
 
   return commands
-
 
 def create_acc_opt(packer):
   commands = []
@@ -249,12 +248,12 @@ def create_acc_opt(packer):
 
   return commands
 
-
 def create_frt_radar_opt(packer):
   frt_radar11_values = {
     "CF_FCA_Equip_Front_Radar": 1,
   }
   return packer.make_can_msg("FRT_RADAR11", 0, frt_radar11_values)
+
 
 # ---------------------------------------------------------------------------------------
 # CF_Lkas_FcwOpt_USM 0 = No car + lanes

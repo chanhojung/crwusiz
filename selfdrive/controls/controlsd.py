@@ -4,7 +4,7 @@ import math
 from typing import SupportsFloat
 
 from cereal import car, log
-from common.numpy_fast import clip, interp
+from common.numpy_fast import clip
 from common.realtime import sec_since_boot, config_realtime_process, Priority, Ratekeeper, DT_CTRL
 from common.profiler import Profiler
 from common.params import Params, put_nonblocking
@@ -134,8 +134,8 @@ class Controls:
       safety_config.safetyModel = car.CarParams.SafetyModel.noOutput
       self.CP.safetyConfigs = [safety_config]
 
-    if is_tested_branch():
-      self.CP.experimentalLongitudinalAvailable = False
+    #if is_tested_branch():
+    #  self.CP.experimentalLongitudinalAvailable = False
 
     # Write CarParams for radard
     cp_bytes = self.CP.to_bytes()
@@ -325,7 +325,7 @@ class Controls:
       else:
         safety_mismatch = pandaState.safetyModel not in IGNORED_SAFETY_MODES
 
-      if safety_mismatch or self.mismatch_counter >= 200:
+      if safety_mismatch or pandaState.safetyRxChecksInvalid or self.mismatch_counter >= 200:
         self.events.add(EventName.controlsMismatch)
 
       if log.PandaState.FaultType.relayMalfunction in pandaState.faults:
@@ -393,7 +393,7 @@ class Controls:
 
     if not REPLAY:
       # Check for mismatch between openpilot and car's PCM
-      cruise_mismatch = CS.cruiseState.enabledAcc and (not self.enabled or not self.CP.pcmCruise)
+      cruise_mismatch = CS.cruiseState.enabled and (not self.enabled or not self.CP.pcmCruise)
       self.cruise_mismatch_counter = self.cruise_mismatch_counter + 1 if cruise_mismatch else 0
       if self.cruise_mismatch_counter > int(6. / DT_CTRL):
         self.events.add(EventName.cruiseMismatch)
@@ -473,7 +473,8 @@ class Controls:
       self.mismatch_counter = 0
 
     # All pandas not in silent mode must have controlsAllowed when openpilot is enabled
-    if self.enabled and any(not ps.controlsAllowed for ps in self.sm['pandaStates'] if ps.safetyModel not in IGNORED_SAFETY_MODES):
+    if self.enabled and any(not ps.controlsAllowed for ps in self.sm['pandaStates']
+                            if ps.safetyModel not in IGNORED_SAFETY_MODES):
       self.mismatch_counter += 1
 
     self.distance_traveled += CS.vEgo * DT_CTRL
@@ -484,22 +485,21 @@ class Controls:
     """Compute conditional state transitions and execute actions on state transitions"""
 
     self.v_cruise_kph_last = self.v_cruise_kph
-    self.CP.pcmCruise = self.CI.CP.pcmCruise
 
-    SccSmoother.update_cruise_buttons(self, CS, self.CP.openpilotLongitudinalControl)
-
-    #if CS.cruiseState.available:
+    if CS.cruiseState.available:
     # if stock cruise is completely disabled, then we can use our own set speed logic
-    #  if not self.CP.pcmCruise:
-    #    self.v_cruise_kph = update_v_cruise(self.v_cruise_kph, CS.vEgo, CS.gasPressed, CS.buttonEvents,
-    #                                        self.button_timers, self.enabled, self.is_metric)
-    #    self.v_cruise_cluster_kph = self.v_cruise_kph
-    #  else:
-    #    self.v_cruise_kph = CS.cruiseState.speed * CV.MS_TO_KPH
-    #    self.v_cruise_cluster_kph = CS.cruiseState.speedCluster * CV.MS_TO_KPH
-    #else:
-    #  self.v_cruise_kph = V_CRUISE_INITIAL
-    #  self.v_cruise_cluster_kph = V_CRUISE_INITIAL
+      if not self.CP.pcmCruise:
+        if self.CP.carName == "hyundai":
+          self.v_cruise_kph = SccSmoother.update_v_cruise(self.v_cruise_kph, CS.buttonEvents, self.enabled, self.is_metric)
+        else:
+          self.v_cruise_kph = update_v_cruise(self.v_cruise_kph, CS.vEgo, CS.gasPressed, CS.buttonEvents, self.button_timers, self.enabled, self.is_metric)
+        self.v_cruise_cluster_kph = self.v_cruise_kph
+      else:
+        self.v_cruise_kph = CS.cruiseState.speed * CV.MS_TO_KPH
+        self.v_cruise_cluster_kph = CS.cruiseState.speedCluster * CV.MS_TO_KPH
+    else:
+      self.v_cruise_kph = 0 #V_CRUISE_INITIAL
+      self.v_cruise_cluster_kph = 0 #V_CRUISE_INITIAL
 
     # decrement the soft disable timer at every step, as it's reset on
     # entrance in SOFT_DISABLING state
@@ -618,14 +618,11 @@ class Controls:
       self.LaC.reset()
     if not CC.longActive:
       self.LoC.reset(v_pid=CS.vEgo)
-    if not CS.cruiseState.enabledAcc:
-      self.LoC.reset(v_pid=CS.vEgo)
     if not self.joystick_mode:
       # accel PID loop
       pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, CS.vEgo, self.v_cruise_kph * CV.KPH_TO_MS)
       t_since_plan = (self.sm.frame - self.sm.rcv_frame['longitudinalPlan']) * DT_CTRL
-      actuators.accel = self.LoC.update(CC.longActive and CS.cruiseState.enabledAcc, CS, long_plan,
-                                        pid_accel_limits, t_since_plan, self.sm['radarState'])
+      actuators.accel = self.LoC.update(CC.longActive, CS, long_plan, pid_accel_limits, t_since_plan, self.sm['radarState'])
 
       # Steering PID loop and lateral MPC
       self.desired_curvature, self.desired_curvature_rate = get_lag_adjusted_curvature(self.CP, CS.vEgo,
@@ -707,8 +704,8 @@ class Controls:
     if len(angular_rate_value) > 2:
       CC.angularVelocity = angular_rate_value
 
-    #CC.cruiseControl.cancel = CS.cruiseState.enabled and (not self.enabled or not self.CP.pcmCruise)
-    CC.cruiseControl.cancel = self.CP.pcmCruise and not self.enabled and CS.cruiseState.enabled
+    CC.cruiseControl.override = self.enabled and not CC.longActive and self.CP.openpilotLongitudinalControl
+    CC.cruiseControl.cancel = CS.cruiseState.enabled and (not self.enabled or not self.CP.pcmCruise)
     if self.joystick_mode and self.sm.rcv_frame['testJoystick'] > 0 and self.sm['testJoystick'].buttons[0]:
       CC.cruiseControl.cancel = True
 

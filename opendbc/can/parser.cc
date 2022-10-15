@@ -127,7 +127,7 @@ CANParser::CANParser(int abus, const std::string& dbc_name,
     }
 
     state.size = msg->size;
-    assert(state.size < 64);  // max signal size is 64 bytes
+    assert(state.size <= 64);  // max signal size is 64 bytes
 
     // track checksums and counters for this message
     for (const auto& sig : msg->sigs) {
@@ -288,10 +288,15 @@ void CANParser::UpdateValid(uint64_t sec) {
     const bool timed_out = (sec - state.last_seen_nanos) > state.check_threshold;
     if (state.check_threshold > 0 && (missing || timed_out)) {
       if (show_missing && !bus_timeout) {
+        char chk_cmd[100];
         if (missing) {
           LOGE("0x%X NOT SEEN", state.address);
+          sprintf(chk_cmd, "echo -n 0x%X > /data/can_missing.log", state.address);
+          system(chk_cmd);
         } else if (timed_out) {
           LOGE("0x%X TIMED OUT", state.address);
+          sprintf(chk_cmd,"echo -n 0x%X > /data/can_timeout.log", state.address);
+          system(chk_cmd);
         }
       }
       _valid = false;

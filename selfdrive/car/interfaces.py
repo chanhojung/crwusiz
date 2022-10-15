@@ -10,11 +10,12 @@ from common.conversions import Conversions as CV
 from common.kalman.simple_kalman import KF1D
 from common.numpy_fast import interp
 from common.realtime import DT_CTRL
-from selfdrive.car import apply_hysteresis, create_button_enable_events, gen_empty_fingerprint
+from selfdrive.car import apply_hysteresis, gen_empty_fingerprint
 from selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, apply_deadzone
 from selfdrive.controls.lib.events import Events
 from selfdrive.controls.lib.vehicle_model import VehicleModel
 
+ButtonType = car.CarState.ButtonEvent.Type
 GearShifter = car.CarState.GearShifter
 EventName = car.CarEvent.EventName
 TorqueFromLateralAccelCallbackType = Callable[[float, car.CarParams.LateralTorqueTuning, float, float, bool], float]
@@ -215,7 +216,8 @@ class CarInterfaceBase(ABC):
   def apply(self, c: car.CarControl, controls) -> Tuple[car.CarControl.Actuators, List[bytes]]:
     pass
 
-  def create_common_events(self, cs_out, extra_gears=None, pcm_enable=True, allow_enable=True):
+  def create_common_events(self, cs_out, extra_gears=None, pcm_enable=True, allow_enable=True,
+                           enable_buttons=(ButtonType.accelCruise, ButtonType.decelCruise)):
     events = Events()
 
     if cs_out.doorOpen:
@@ -248,7 +250,15 @@ class CarInterfaceBase(ABC):
       events.add(EventName.steerOverride)
 
     # Handle button presses
-    events.events.extend(create_button_enable_events(cs_out.buttonEvents, pcm_cruise=self.CP.pcmCruise))
+    for b in cs_out.buttonEvents:
+      # Enable OP long on falling edge of enable buttons (defaults to accelCruise and decelCruise, overridable per-port)
+      if not self.CP.pcmCruise and (b.type in enable_buttons and not b.pressed):
+        events.add(EventName.buttonEnable)
+      elif self.CP.pcmCruise and (b.type in enable_buttons and b.pressed):
+        events.add(EventName.buttonEnable)
+      # Disable on rising edge of cancel for both stock and OP long
+      if b.type == ButtonType.cancel and b.pressed:
+        events.add(EventName.buttonCancel)
 
     # Handle permanent and temporary steering faults
     self.steering_unpressed = 0 if cs_out.steeringPressed else self.steering_unpressed + 1
@@ -311,23 +321,11 @@ class CarStateBase(ABC):
                          C=[1.0, 0.0],
                          K=[[0.17406039], [1.65925647]])
 
-    self.v_ego_clu_kf = KF1D(x0=[[0.0], [0.0]],
-                         A=[[1.0, DT_CTRL], [0.0, 1.0]],
-                         C=[1.0, 0.0],
-                         K=[[0.17406039], [1.65925647]])
-
   def update_speed_kf(self, v_ego_raw):
     if abs(v_ego_raw - self.v_ego_kf.x[0][0]) > 2.0:  # Prevent large accelerations when car starts at non zero speed
       self.v_ego_kf.x = [[v_ego_raw], [0.0]]
 
     v_ego_x = self.v_ego_kf.update(v_ego_raw)
-    return float(v_ego_x[0]), float(v_ego_x[1])
-
-  def update_clu_speed_kf(self, v_ego_raw):
-    if abs(v_ego_raw - self.v_ego_clu_kf.x[0][0]) > 2.0:  # Prevent large accelerations when car starts at non zero speed
-      self.v_ego_clu_kf.x = [[v_ego_raw], [0.0]]
-
-    v_ego_x = self.v_ego_clu_kf.update(v_ego_raw)
     return float(v_ego_x[0]), float(v_ego_x[1])
 
   def get_wheel_speeds(self, fl, fr, rl, rr, unit=CV.KPH_TO_MS):

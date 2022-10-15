@@ -245,7 +245,6 @@ struct CarState {
     speedOffset @3 :Float32;
     standstill @4 :Bool;
     nonAdaptive @5 :Bool;
-    enabledAcc @7 :Bool;
   }
 
   enum GearShifter {
@@ -377,6 +376,7 @@ struct CarControl {
   struct CruiseControl {
     cancel @0: Bool;
     resume @1: Bool;
+    override @4: Bool;
     speedOverrideDEPRECATED @2: Float32;
     accelOverrideDEPRECATED @3: Float32;
   }
@@ -445,14 +445,12 @@ struct CarParams {
   enableGasInterceptor @2 :Bool;
   pcmCruise @3 :Bool;        # is openpilot's state tied to the PCM's cruise state?
   enableDsu @5 :Bool;        # driving support unit
-  enableApgs @6 :Bool;       # advanced parking guidance system
   enableBsm @56 :Bool;       # blind spot monitoring
   flags @64 :UInt32;         # flags for car specific quirks
   experimentalLongitudinalAvailable @71 :Bool;
 
   minEnableSpeed @7 :Float32;
   minSteerSpeed @8 :Float32;
-  maxSteeringAngleDeg @54 :Float32;
   safetyConfigs @62 :List(SafetyConfig);
   alternativeExperience @65 :Int16;      # panda flag for features like no disengage on gas
 
@@ -486,7 +484,6 @@ struct CarParams {
 
   vEgoStopping @29 :Float32; # Speed at which the car goes into stopping state
   vEgoStarting @59 :Float32; # Speed at which the car goes into starting state
-  directAccelControl @30 :Bool; # Does the car have direct accel control or just gas/brake
   stoppingControl @31 :Bool; # Does the car allow full control even at lows speeds when stopping
   steerControlType @34 :SteerControlType;
   radarOffCan @35 :Bool; # True when radar objects aren't visible on CAN
@@ -517,9 +514,7 @@ struct CarParams {
     safetyParam2DEPRECATED @2 :UInt32;
   }
 
-  steerFaultMaxAngle @80 :Int16;
-  steerFaultMaxFrames @81 :Int16;
-  epsBus @82: Int8;
+  epsBus @80: Int8;
   sasBus @72: Int8;
   sccBus @73: Int8;
   enableAutoHold @74 :Bool;
@@ -662,6 +657,7 @@ struct CarParams {
     hud @11; # heads up display
     combinationMeter @12; # instrument cluster
     electricBrakeBooster @15;
+    shiftByWire @16;
     adas @19;
 
     # Toyota only
@@ -671,10 +667,12 @@ struct CarParams {
     # Honda only
     vsa @13; # Vehicle Stability Assist
     programmedFuelInjection @14;
-    shiftByWire @16;
 
     # Chrysler only
     hcp @18;  # Hybrid Control Processor
+
+    # Hyundai only
+    vcu @20;  # Vehicle (Motor) Control Unit
 
     debug @17;
   }
@@ -691,6 +689,7 @@ struct CarParams {
   }
 
   enableCameraDEPRECATED @4 :Bool;
+  enableApgsDEPRECATED @6 :Bool;
   steerRateCostDEPRECATED @33 :Float32;
   isPandaBlackDEPRECATED @39 :Bool;
   hasStockCameraDEPRECATED @57 :Bool;
@@ -706,4 +705,6 @@ struct CarParams {
   gasMaxVDEPRECATED @14 :List(Float32);
   brakeMaxBPDEPRECATED @15 :List(Float32);
   brakeMaxVDEPRECATED @16 :List(Float32);
+  directAccelControlDEPRECATED @30 :Bool;
+  maxSteeringAngleDegDEPRECATED @54 :Float32;
 }

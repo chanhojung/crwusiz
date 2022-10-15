@@ -58,6 +58,14 @@
         <source>leave blank for automatic configuration</source>
         <translation>자동설정하려면 공백으로 두세요</translation>
     </message>
+    <message>
+        <source>Cellular Metered</source>
+        <translation>데이터 요금제</translation>
+    </message>
+    <message>
+        <source>Prevent large data uploads when on a metered connection</source>
+        <translation>데이터 요금제 연결 시 대용량 데이터 업로드 방지</translation>
+    </message>
 </context>
 <context>
     <name>AebSelect</name>
@@ -111,6 +119,10 @@
     <message>
         <source>Some newer car New radar interface</source>
         <translation>레이더 CAN 신호 해독된 일부차량을위한 옵션입니다.</translation>
+    </message>
+    <message>
+        <source>Select your Manufacturer</source>
+        <translation>제조사를 선택하세요</translation>
     </message>
 </context>
 <context>
@@ -720,8 +732,19 @@ location set</source>
         <translation>뒤로</translation>
     </message>
     <message>
-        <source>Select car not use</source>
-        <translation>차량선택 사용안함</translation>
+        <source>Select Car not use</source>
+        <translation>차량 선택 사용안함</translation>
+    </message>
+</context>
+<context>
+    <name>SelectManufacturer</name>
+    <message>
+        <source>Back</source>
+        <translation>뒤로</translation>
+    </message>
+    <message>
+        <source>Select Manufacturer not use</source>
+        <translation>제조사 선택 사용안함</translation>
     </message>
 </context>
 <context>

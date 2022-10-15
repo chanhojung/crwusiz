@@ -137,6 +137,7 @@ struct FrameData {
   gain @15 :Float32; # This includes highConversionGain if enabled
   measuredGreyFraction @21 :Float32;
   targetGreyFraction @22 :Float32;
+  exposureValPercent @27 :Float32;
 
   # Focus
   lensPos @11 :Int32;
@@ -400,30 +401,34 @@ struct DeviceState @0xa4d8b5af2aa492eb {
 
 struct PandaState @0xa7649e2575e4591e {
   ignitionLine @2 :Bool;
-  controlsAllowed @3 :Bool;
   gasInterceptorDetected @4 :Bool;
   rxBufferOverflow @7 :UInt32;
   txBufferOverflow @8 :UInt32;
-  safetyRxInvalid @19 :UInt32;
   gmlanSendErrs @9 :UInt32;
   pandaType @10 :PandaType;
   ignitionCan @13 :Bool;
-  safetyModel @14 :Car.CarParams.SafetyModel;
-  safetyParam @27 :UInt16;
-  alternativeExperience @23 :Int16;
   faultStatus @15 :FaultStatus;
   powerSaveEnabled @16 :Bool;
   uptime @17 :UInt32;
   faults @18 :List(FaultType);
   harnessStatus @21 :HarnessStatus;
   heartbeatLost @22 :Bool;
-  safetyTxBlocked @24 :UInt32;
   interruptLoad @25 :Float32;
   fanPower @28 :UInt8;
 
+  # can health
   canState0 @29 :PandaCanState;
   canState1 @30 :PandaCanState;
   canState2 @31 :PandaCanState;
+
+  # safety stuff
+  controlsAllowed @3 :Bool;
+  safetyRxInvalid @19 :UInt32;
+  safetyTxBlocked @24 :UInt32;
+  safetyModel @14 :Car.CarParams.SafetyModel;
+  safetyParam @27 :UInt16;
+  alternativeExperience @23 :Int16;
+  safetyRxChecksInvalid @32 :Bool;
 
   enum FaultStatus {
     none @0;
@@ -506,6 +511,7 @@ struct PandaState @0xa7649e2575e4591e {
     canDataSpeed @17 :UInt16;
     canfdEnabled @18 :Bool;
     brsEnabled @19 :Bool;
+    canfdNonIso @20 :Bool;
 
     enum LecErrorCode {
       noError @0;
@@ -949,7 +955,8 @@ struct LongitudinalPlan @0xe00b5b3eba12876c {
 
   solverExecutionTime @35 :Float32;
 
-  debugLong @36 : Int32;
+  xState @36 : Int32;
+  trafficState @37 : Int32;
 
   enum LongitudinalPlanSource {
     cruise @0;
@@ -1218,6 +1225,7 @@ struct GnssMeasurements {
     # Different ultra-rapid files:
     nasaUltraRapid @1;
     glonassIacUltraRapid @2;
+    qcom @3;
   }
 }
 
@@ -1411,7 +1419,7 @@ struct QcomGnss @0xde94674b07ae51c1 {
     unknown3 @3;
     unknown4 @4;
     unknown5 @5;
-    unknown6 @6;
+    sbas @6;
   }
 
   enum SVObservationState @0xe81e829a0d6c83e9 {
@@ -2000,7 +2008,13 @@ struct Event {
     gpsNMEA @3 :GPSNMEAData;
     can @5 :List(CanData);
     controlsState @7 :ControlsState;
-    sensorEvents @11 :List(SensorEventData);
+    gyroscope @99 :SensorEventData;
+    gyroscope2 @100 :SensorEventData;
+    accelerometer @98 :SensorEventData;
+    accelerometer2 @101 :SensorEventData;
+    magnetometer @95 :SensorEventData;
+    lightSensor @96 :SensorEventData;
+    temperatureSensor @97 :SensorEventData;
     pandaStates @81 :List(PandaState);
     peripheralState @80 :PeripheralState;
     radarState @13 :RadarState;
@@ -2056,7 +2070,7 @@ struct Event {
     userFlag @93 :UserFlag;
 
     # neokii
-    roadLimitSpeed @95 :RoadLimitSpeed;
+    roadLimitSpeed @102 :RoadLimitSpeed;
 
     # *********** debug ***********
     testJoystick @52 :Joystick;
@@ -2102,5 +2116,6 @@ struct Event {
     uiLayoutStateDEPRECATED @57 :Legacy.UiLayoutState;
     pandaStateDEPRECATED @12 :PandaState;
     driverStateDEPRECATED @59 :DriverStateDEPRECATED;
+    sensorEventsDEPRECATED @11 :List(SensorEventData);
   }
 }

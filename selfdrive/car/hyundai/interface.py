@@ -8,6 +8,7 @@ from selfdrive.car.hyundai.values import HyundaiFlags, CAR, Buttons, CarControll
 from selfdrive.car import STD_CARGO_KG, create_button_event, scale_rot_inertia, scale_tire_stiffness, gen_empty_fingerprint, get_safety_config
 from selfdrive.car.interfaces import CarInterfaceBase
 from selfdrive.controls.lib.desire_helper import LANE_CHANGE_SPEED_MIN
+from selfdrive.car.disable_ecu import disable_ecu
 
 ButtonType = car.CarState.ButtonEvent.Type
 EventName = car.CarEvent.EventName
@@ -20,8 +21,8 @@ class CarInterface(CarInterfaceBase):
   def get_pid_accel_limits(CP, current_speed, cruise_speed):
     v_current_kph = current_speed * CV.MS_TO_KPH
 
-    gas_max_bp = [10., 20., 50., 70., 130., 150.]
-    gas_max_v = [1.3, 1.1, 0.63, 0.44, 0.15, 0.1]
+    gas_max_bp = [10., 70., 100., 150.]
+    gas_max_v = [1.5, 0.8, 0.3, 0.1]
 
     return CarControllerParams.ACCEL_MIN, interp(v_current_kph, gas_max_bp, gas_max_v)
 
@@ -29,35 +30,38 @@ class CarInterface(CarInterfaceBase):
   def get_params(candidate, fingerprint=gen_empty_fingerprint(), car_fw=[], experimental_long=False):  # pylint: disable=dangerous-default-value
     ret = CarInterfaceBase.get_std_params(candidate, fingerprint)
 
-    # WARNING: disabling radar also disables AEB (and we show the same warning on the instrument cluster as if you manually disabled AEB)
-    ret.experimentalLongitudinalAvailable = candidate not in CANFD_CAR #(LEGACY_SAFETY_MODE_CAR | CAMERA_SCC_CAR | CANFD_CAR)
-    ret.openpilotLongitudinalControl = (experimental_long and ret.experimentalLongitudinalAvailable)
-
     ret.carName = "hyundai"
+
+    # *** longitudinal control ***
     if candidate in CANFD_CAR:
-      ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.noOutput),
-                           get_safety_config(car.CarParams.SafetyModel.hyundaiCanfd)]
+      ret.longitudinalTuning.kpV = [0.1]
+      ret.longitudinalTuning.kiV = [0.0]
+      ret.longitudinalActuatorDelayLowerBound = 0.15
+      ret.longitudinalActuatorDelayUpperBound = 0.5
+      ret.experimentalLongitudinalAvailable = bool(ret.flags & HyundaiFlags.CANFD_HDA2)
     else:
-      ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.hyundaiCommunity, 0)]
+      ret.longitudinalTuning.kpBP = [0., 5.*CV.KPH_TO_MS, 10.*CV.KPH_TO_MS, 30.*CV.KPH_TO_MS, 130.*CV.KPH_TO_MS]
+      ret.longitudinalTuning.kpV = [1.2, 1.05, 1.0, 0.92, 0.55]
+      ret.longitudinalTuning.kiBP = [0., 130.*CV.KPH_TO_MS]
+      ret.longitudinalTuning.kiV = [0.1, 0.05]
+      ret.longitudinalActuatorDelayLowerBound = 0.3
+      ret.longitudinalActuatorDelayUpperBound = 0.3
+      ret.experimentalLongitudinalAvailable = not ret.radarOffCan or ret.sccBus == 2
 
-    ret.steerActuatorDelay = 0.1
-    ret.steerLimitTimer = 0.4
-
-    # longitudinal
-    ret.longitudinalTuning.kpBP = [0., 5. * CV.KPH_TO_MS, 10. * CV.KPH_TO_MS, 30. * CV.KPH_TO_MS, 130. * CV.KPH_TO_MS]
-    ret.longitudinalTuning.kpV = [1.2, 1.0, 0.93, 0.88, 0.5]
-    ret.longitudinalTuning.kiBP = [0., 130. * CV.KPH_TO_MS]
-    ret.longitudinalTuning.kiV = [0.1, 0.05]
-    ret.longitudinalActuatorDelayLowerBound = 0.5
-    ret.longitudinalActuatorDelayUpperBound = 0.5
+    # WARNING: disabling radar also disables AEB (and we show the same warning on the instrument cluster as if you manually disabled AEB)
+    ret.openpilotLongitudinalControl = experimental_long and ret.experimentalLongitudinalAvailable
 
     ret.stoppingControl = True
     ret.stoppingDecelRate = 1.0
-    ret.vEgoStopping = 0.8
+    ret.vEgoStopping = 0.5
+    ret.stopAccel = -3.5
 
     ret.startingState = True
     ret.vEgoStarting = 0.1
     ret.startAccel = 2.0
+
+    ret.steerActuatorDelay = 0.1
+    ret.steerLimitTimer = 0.4
 
     tire_stiffness_factor = 1.
 
@@ -297,30 +301,28 @@ class CarInterface(CarInterfaceBase):
     elif any([Params().get("LateralControlSelect", encoding='utf8') == "3", candidate in CANFD_CAR]):
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
-    ret.centerToFront = ret.wheelbase * 0.4
-    ret.radarTimeStep = 0.05
-
-    # TODO: get actual value, for now starting with reasonable value for
-    # civic and scaling by mass and wheelbase
-    ret.rotationalInertia = scale_rot_inertia(ret.mass, ret.wheelbase)
-
-    # TODO: start from empirically derived lateral slip stiffness for the civic and scale by
-    # mass and CG position, so all cars will have approximately similar dyn behaviors
-    ret.tireStiffnessFront, ret.tireStiffnessRear = \
-      scale_tire_stiffness(ret.mass, ret.wheelbase, ret.centerToFront, tire_stiffness_factor=tire_stiffness_factor)
 
     if candidate in CANFD_CAR:
-      ret.enableBsm = 0x58b in fingerprint[0]
-      ret.radarOffCan = False
-      if 0x50 in fingerprint[6]:
+      ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.noOutput),
+                           get_safety_config(car.CarParams.SafetyModel.hyundaiCanfd)]
+
+      ret.enableBsm = 0x58b in fingerprint[0] # 1419
+      ret.radarOffCan = RADAR_START_ADDR not in fingerprint[1] or DBC[ret.carFingerprint]["radar"] is None
+      ret.pcmCruise = not ret.openpilotLongitudinalControl
+      if 0x50 in fingerprint[6]: # 80
         ret.flags |= HyundaiFlags.CANFD_HDA2.value
-        ret.safetyConfigs[1].safetyParam |= Panda.FLAG_HYUNDAI_CANFD_HDA2
       else:
         # non-HDA2
-        if 0x1cf not in fingerprint[4]:
+        if 0x1cf not in fingerprint[4]: # 463
           ret.flags |= HyundaiFlags.CANFD_ALT_BUTTONS.value
-          ret.safetyConfigs[1].safetyParam |= Panda.FLAG_HYUNDAI_CANFD_ALT_BUTTONS
+
+      if ret.flags & HyundaiFlags.CANFD_HDA2:
+        ret.safetyConfigs[1].safetyParam |= Panda.FLAG_HYUNDAI_CANFD_HDA2
+      if ret.flags & HyundaiFlags.CANFD_ALT_BUTTONS:
+        ret.safetyConfigs[1].safetyParam |= Panda.FLAG_HYUNDAI_CANFD_ALT_BUTTONS
     else:
+      ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.hyundaiCommunity, 0)]
+
       # ignore CAN2 address if L-CAN on the same BUS
       ret.epsBus = 1 if 593 in fingerprint[1] and 1296 not in fingerprint[1] else 0
       ret.sasBus = 1 if 688 in fingerprint[1] and 1296 not in fingerprint[1] else 0
@@ -332,23 +334,55 @@ class CarInterface(CarInterfaceBase):
         ret.hasScc13 = 1290 in fingerprint[ret.sccBus]
         ret.hasScc14 = 905 in fingerprint[ret.sccBus]
 
-      ret.enableBsm = 0x58b in fingerprint[0]
+      ret.enableBsm = 1419 in fingerprint[0]
       ret.enableAutoHold = 1151 in fingerprint[0]
       ret.hasEms = 608 in fingerprint[0] and 809 in fingerprint[0]
-      ret.hasLfaHda = 1157 in fingerprint[0]
+      ret.hasLfaHda = 1157 in fingerprint[0] or 1157 in fingerprint[2]
       ret.aebFcw = Params().get("AebSelect", encoding='utf8') == "1"
       ret.radarOffCan = ret.sccBus == -1
+      ret.pcmCruise = ret.radarOffCan
 
-    ret.pcmCruise = not ret.radarOffCan
+    #if ret.openpilotLongitudinalControl:
+    #  ret.safetyConfigs[-1].safetyParam |= Panda.FLAG_HYUNDAI_LONG
+    #if candidate in HYBRID_CAR:
+    #  ret.safetyConfigs[-1].safetyParam |= Panda.FLAG_HYUNDAI_HYBRID_GAS
+    #elif candidate in EV_CAR:
+    #  ret.safetyConfigs[-1].safetyParam |= Panda.FLAG_HYUNDAI_EV_GAS
+
+    ret.centerToFront = ret.wheelbase * 0.4
+
+    # TODO: get actual value, for now starting with reasonable value for
+    # civic and scaling by mass and wheelbase
+    ret.rotationalInertia = scale_rot_inertia(ret.mass, ret.wheelbase)
+
+    # TODO: start from empirically derived lateral slip stiffness for the civic and scale by
+    # mass and CG position, so all cars will have approximately similar dyn behaviors
+    ret.tireStiffnessFront, ret.tireStiffnessRear = \
+      scale_tire_stiffness(ret.mass, ret.wheelbase, ret.centerToFront, tire_stiffness_factor=tire_stiffness_factor)
 
     return ret
+
+
+  @staticmethod
+  def init(CP, logcan, sendcan):
+    if all([CP.openpilotLongitudinalControl, CANFD_CAR, CP.sccBus == 0]):
+      addr, bus = 0x7d0, 0
+      if CP.flags & HyundaiFlags.CANFD_HDA2.value:
+        addr, bus = 0x730, 5
+      disable_ecu(logcan, sendcan, bus=bus, addr=addr, com_cont_req=b'\x28\x83\x01')
 
 
   def _update(self, c):
     ret = self.CS.update(self.cp, self.cp2, self.cp_cam)
 
-    if not self.cp.can_valid or not self.cp2.can_valid or not self.cp_cam.can_valid:
-      print('cp = {}  cp2 = {}  cp_cam = {}'.format(bool(self.cp.can_valid), bool(self.cp2.can_valid), bool(self.cp_cam.can_valid)))
+    if CANFD_CAR:
+      canvalid = any([self.cp.can_valid, self.cp_cam.can_valid])
+      if not canvalid:
+        print('cp = {}  cp_cam = {}'.format(bool(self.cp.can_valid), bool(self.cp_cam.can_valid)))
+    else:
+      canvalid = any([self.cp.can_valid, self.cp2.can_valid, self.cp_cam.can_valid])
+      if not canvalid:
+        print('cp = {}  cp2 = {}  cp_cam = {}'.format(bool(self.cp.can_valid), bool(self.cp2.can_valid), bool(self.cp_cam.can_valid)))
 
     if self.CP.pcmCruise and not self.CC.scc_live:
       self.CP.pcmCruise = False
@@ -358,7 +392,7 @@ class CarInterface(CarInterfaceBase):
     # most HKG cars has no long control, it is safer and easier to engage by main on
     ret.cruiseState.enabled = ret.cruiseState.available
 
-    if self.CS.cruise_buttons[-1] != self.CS.prev_cruise_buttons:
+    if all([self.CS.CP.openpilotLongitudinalControl, self.CS.cruise_buttons[-1] != self.CS.prev_cruise_buttons]):
       buttonEvents = [create_button_event(self.CS.cruise_buttons[-1], self.CS.prev_cruise_buttons, BUTTONS_DICT)]
       # Handle CF_Clu_CruiseSwState changing buttons mid-press
       if self.CS.cruise_buttons[-1] != 0 and self.CS.prev_cruise_buttons != 0:
@@ -372,15 +406,15 @@ class CarInterface(CarInterfaceBase):
     allow_enable = any(btn in ENABLE_BUTTONS for btn in self.CS.cruise_buttons) or any(self.CS.main_buttons)
     events = self.create_common_events(ret, pcm_enable=self.CS.CP.pcmCruise, allow_enable=allow_enable)
 
+    #if self.CS.brake_error:
+    #  events.add(EventName.brakeUnavailable)
+
     # turning indicator alert logic
     if any([ret.leftBlinker, ret.rightBlinker, self.CC.turning_signal_timer]) and ret.vEgo < LANE_CHANGE_SPEED_MIN - 1.2:
       self.CC.turning_indicator_alert = True
     else:
       self.CC.turning_indicator_alert = False
 
-    #if self.CC.longcontrol and self.CS.cruise_unavail:
-    if self.CS.brake_error:
-      events.add(EventName.brakeUnavailable)
     if self.CC.turning_indicator_alert:
       events.add(EventName.turningIndicatorOn)
 

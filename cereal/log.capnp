@@ -1021,8 +1021,9 @@ struct LateralPlan @0xe1e9318e2ae8b51e {
   curvatureRates @28 :List(Float32);
 
   solverExecutionTime @30 :Float32;
+  blinker @32 :Blinker;
 
-  autoLaneChangeEnabled @32 :Bool;
+  autoLaneChangeEnabled @34 :Bool;
   autoLaneChangeTimer @33 :Int8;
 
   enum Desire {
@@ -1043,6 +1044,12 @@ struct LateralPlan @0xe1e9318e2ae8b51e {
   }
 
   enum LaneChangeDirection {
+    none @0;
+    left @1;
+    right @2;
+  }
+
+  enum Blinker {
     none @0;
     left @1;
     right @2;
@@ -1898,6 +1905,10 @@ struct Sentinel {
   signal @1 :Int32;
 }
 
+struct UIDebug {
+  drawTimeMillis @0 :Float32;
+}
+
 struct ManagerState {
   processes @0 :List(ProcessState);
 
@@ -2066,11 +2077,12 @@ struct Event {
     navRoute @83 :NavRoute;
     navThumbnail @84: Thumbnail;
 
-    # user flags
+    # UI services
     userFlag @93 :UserFlag;
+    uiDebug @102 :UIDebug;
 
     # neokii
-    roadLimitSpeed @102 :RoadLimitSpeed;
+    roadLimitSpeed @103 :RoadLimitSpeed;
 
     # *********** debug ***********
     testJoystick @52 :Joystick;

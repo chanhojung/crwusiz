@@ -212,7 +212,7 @@ class CarState(CarStateBase):
 
     if self.CP.carFingerprint in EV_CAR:
       ret.gas = cp.vl["ACCELERATOR"]["ACCELERATOR_PEDAL"] / 255.
-    else:
+    elif self.CP.carFingerprint in HYBRID_CAR:
       ret.gas = cp.vl["ACCELERATOR_ALT"]["ACCELERATOR_PEDAL"] / 1023.
     ret.gasPressed = ret.gas > 1e-5
     ret.brakePressed = cp.vl["BRAKE"]["BRAKE_PRESSED"] == 1
@@ -261,17 +261,6 @@ class CarState(CarStateBase):
       self.cam_0x2a4 = copy.copy(cp_cam.vl["CAM_0x2a4"])
 
     self.acc_mode = cp.vl["SCC1"]["CRUISE_ACTIVE"] == 1
-
-    self.cluster_speed_counter += 1
-    if self.cluster_speed_counter > CLUSTER_SAMPLE_RATE:
-      self.cluster_speed = cp.vl["CLU15"]["CF_Clu_VehicleSpeed"]
-      self.cluster_speed_counter = 0
-
-      # mimic how dash converts to imperial
-      if not self.is_metric:
-        self.cluster_speed = math.floor(self.cluster_speed * CV.KPH_TO_MPH + CV.KPH_TO_MPH)
-
-    ret.vEgoCluster = self.cluster_speed * self.speed_conv
 
     return ret
 
@@ -770,7 +759,7 @@ class CarState(CarStateBase):
       checks += [
         ("ACCELERATOR", 100),
       ]
-    else:
+    elif CP.carFingerprint in HYBRID_CAR:
       signals += [
         ("ACCELERATOR_PEDAL", "ACCELERATOR_ALT"),
       ]

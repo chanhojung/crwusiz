@@ -5,6 +5,7 @@ from common.params import Params
 from common.numpy_fast import interp
 from common.conversions import Conversions as CV
 from selfdrive.car.hyundai.values import HyundaiFlags, CAR, Buttons, CarControllerParams, CANFD_CAR
+from selfdrive.car.hyundai.radar_interface import RADAR_START_ADDR
 from selfdrive.car import STD_CARGO_KG, create_button_event, scale_rot_inertia, scale_tire_stiffness, gen_empty_fingerprint, get_safety_config
 from selfdrive.car.interfaces import CarInterfaceBase
 from selfdrive.controls.lib.desire_helper import LANE_CHANGE_SPEED_MIN
@@ -53,8 +54,8 @@ class CarInterface(CarInterfaceBase):
 
     ret.stoppingControl = True
     ret.stoppingDecelRate = 1.0
-    ret.vEgoStopping = 0.5
-    ret.stopAccel = -3.5
+    ret.vEgoStopping = 0.8
+    ret.stopAccel = -2.0
 
     ret.startingState = True
     ret.vEgoStarting = 0.1

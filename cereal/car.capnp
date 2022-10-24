@@ -66,6 +66,7 @@ struct CarEvent @0x9b1657f34caf3ad3 {
     lowBattery @48;
     vehicleModelInvalid @50;
     accFaulted @51;
+    accFaultedTemp @115;
     sensorDataInvalid @52;
     commIssue @53;
     commIssueAvgFreq @109;
@@ -115,7 +116,7 @@ struct CarEvent @0x9b1657f34caf3ad3 {
     controlsdLagging @112;
     resumeBlocked @113;
 
-    turningIndicatorOn @115;
+    turningIndicatorOn @119;
     autoLaneChange @116;
     slowingDownSpeed @117;
     slowingDownSpeedSound @118;
@@ -514,14 +515,13 @@ struct CarParams {
     safetyParam2DEPRECATED @2 :UInt32;
   }
 
-  epsBus @80: Int8;
-  sasBus @72: Int8;
-  sccBus @73: Int8;
-  enableAutoHold @74 :Bool;
-  hasScc13 @75 :Bool;
-  hasScc14 @76 :Bool;
-  hasEms @77 :Bool;
-  hasLfaHda @78 :Bool;
+  epsBus @72: Int8;
+  sasBus @73: Int8;
+  sccBus @74: Int8;
+  enableAutoHold @75 :Bool;
+  hasScc13 @76 :Bool;
+  hasScc14 @77 :Bool;
+  hasEms @78 :Bool;
   aebFcw @79 :Bool;
 
   struct LateralParams {
@@ -659,6 +659,7 @@ struct CarParams {
     electricBrakeBooster @15;
     shiftByWire @16;
     adas @19;
+    cornerRadar @21;
 
     # Toyota only
     dsu @6;

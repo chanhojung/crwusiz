@@ -11,6 +11,7 @@ from selfdrive.car.interfaces import CarInterfaceBase
 from selfdrive.controls.lib.desire_helper import LANE_CHANGE_SPEED_MIN
 from selfdrive.car.disable_ecu import disable_ecu
 
+Ecu = car.CarParams.Ecu
 ButtonType = car.CarState.ButtonEvent.Type
 EventName = car.CarEvent.EventName
 ENABLE_BUTTONS = (Buttons.RES_ACCEL, Buttons.SET_DECEL, Buttons.CANCEL)
@@ -55,7 +56,7 @@ class CarInterface(CarInterfaceBase):
     ret.stoppingControl = True
     ret.stoppingDecelRate = 1.0
     ret.vEgoStopping = 0.8
-    ret.stopAccel = -2.0
+    ret.stopAccel = -3.5
 
     ret.startingState = True
     ret.vEgoStarting = 0.1
@@ -190,6 +191,10 @@ class CarInterface(CarInterfaceBase):
       ret.wheelbase = 2.90
       ret.steerRatio = 16.0
       tire_stiffness_factor = 0.65
+    elif candidate == CAR.SPORTAGE_NQ5:
+      ret.mass = 1767. + STD_CARGO_KG
+      ret.wheelbase = 2.756
+      ret.steerRatio = 13.6
 
     # genesis
     elif candidate == CAR.GENESIS:
@@ -214,8 +219,13 @@ class CarInterface(CarInterfaceBase):
       ret.steerRatio = 13.27 * 1.15  # 15% higher at the center seems reasonable
       tire_stiffness_factor = 0.65
 
-    # Pid -----------------------------------------------------------------
-    if Params().get("LateralControlSelect", encoding='utf8') == "0":
+    lat_pid = Params().get("LateralControlSelect", encoding='utf8') == "0"
+    lat_indi = Params().get("LateralControlSelect", encoding='utf8') == "1"
+    lat_lqr = Params().get("LateralControlSelect", encoding='utf8') == "2"
+    lat_torque = Params().get("LateralControlSelect", encoding='utf8') == "3"
+
+    # -----------------------------------------------------------------
+    if lat_pid:
       ret.lateralTuning.pid.kf = 0.00005
       ret.lateralTuning.pid.kpBP = [0.]
       ret.lateralTuning.pid.kiBP = [0.]
@@ -230,8 +240,8 @@ class CarInterface(CarInterfaceBase):
         ret.lateralTuning.pid.kpV = [0.25]
         ret.lateralTuning.pid.kiV = [0.05]
 
-    # Indi -----------------------------------------------------------------
-    elif Params().get("LateralControlSelect", encoding='utf8') == "1":
+    # -----------------------------------------------------------------
+    elif lat_indi:
       ret.lateralTuning.init('indi')
       ret.lateralTuning.indi.innerLoopGainBP = [0.]
       ret.lateralTuning.indi.outerLoopGainBP = [0.]
@@ -254,8 +264,8 @@ class CarInterface(CarInterfaceBase):
         ret.lateralTuning.indi.timeConstantV = [1.4]
         ret.lateralTuning.indi.actuatorEffectivenessV = [2.3]
 
-    # Lqr -----------------------------------------------------------------
-    elif Params().get("LateralControlSelect", encoding='utf8') == "2":
+    # -----------------------------------------------------------------
+    elif lat_lqr:
       ret.lateralTuning.init('lqr')
       ret.lateralTuning.lqr.a = [0., 1., -0.22619643, 1.21822268]
       ret.lateralTuning.lqr.b = [-1.92006585e-04, 3.95603032e-05]
@@ -298,8 +308,8 @@ class CarInterface(CarInterfaceBase):
         ret.lateralTuning.lqr.k = [-105.0, 450.0]
         ret.lateralTuning.lqr.l = [0.22, 0.318]
 
-    # Torque -----------------------------------------------------------------
-    elif any([Params().get("LateralControlSelect", encoding='utf8') == "3", candidate in CANFD_CAR]):
+    # -----------------------------------------------------------------
+    elif any([lat_torque, candidate in CANFD_CAR]):
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
 
@@ -310,11 +320,12 @@ class CarInterface(CarInterfaceBase):
       ret.enableBsm = 0x58b in fingerprint[0] # 1419
       ret.radarOffCan = RADAR_START_ADDR not in fingerprint[1] or DBC[ret.carFingerprint]["radar"] is None
       ret.pcmCruise = not ret.openpilotLongitudinalControl
-      if 0x50 in fingerprint[6]: # 80
+      # detect HDA2 with ADAS Driving ECU
+      if Ecu.adas in [fw.ecu for fw in car_fw]:
         ret.flags |= HyundaiFlags.CANFD_HDA2.value
       else:
         # non-HDA2
-        if 0x1cf not in fingerprint[4]: # 463
+        if 0x1cf not in fingerprint[4]:
           ret.flags |= HyundaiFlags.CANFD_ALT_BUTTONS.value
 
       if ret.flags & HyundaiFlags.CANFD_HDA2:
@@ -338,7 +349,6 @@ class CarInterface(CarInterfaceBase):
       ret.enableBsm = 1419 in fingerprint[0]
       ret.enableAutoHold = 1151 in fingerprint[0]
       ret.hasEms = 608 in fingerprint[0] and 809 in fingerprint[0]
-      ret.hasLfaHda = 1157 in fingerprint[0] or 1157 in fingerprint[2]
       ret.aebFcw = Params().get("AebSelect", encoding='utf8') == "1"
       ret.radarOffCan = ret.sccBus == -1
       ret.pcmCruise = ret.radarOffCan
@@ -366,7 +376,8 @@ class CarInterface(CarInterfaceBase):
 
   @staticmethod
   def init(CP, logcan, sendcan):
-    if all([CP.openpilotLongitudinalControl, CANFD_CAR, CP.sccBus == 0]):
+    new_radar = Params().get_bool("NewRadarInterface")
+    if all([CP.openpilotLongitudinalControl, new_radar]):
       addr, bus = 0x7d0, 0
       if CP.flags & HyundaiFlags.CANFD_HDA2.value:
         addr, bus = 0x730, 5
